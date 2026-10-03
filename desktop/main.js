@@ -1,6 +1,7 @@
 // Desktop launcher: starts the workbench on this computer and shows it in a window.
 // Data (database, uploaded documents, keys) lives in the user's app-data folder.
 const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { fork } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -95,6 +96,7 @@ async function startServer() {
       SESSION_SECRET: config.sessionSecret,
       DATA_ENCRYPTION_KEY: config.dataEncryptionKey,
       COOKIE_SECURE: "false",
+      APP_VERSION: app.getVersion(),
       REQUIRE_MFA: "true",
       DATABASE_URL: "",
     },
@@ -167,6 +169,64 @@ async function backupData() {
   }
 }
 
+// ---------- Updates ----------
+// New versions are published as GitHub releases. The app checks on start and every
+// 6 hours, downloads quietly, then offers "Restart to update".
+let updateReady = null;
+let manualCheck = false;
+
+function setupUpdates() {
+  if (!app.isPackaged) return; // only installed copies update themselves
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("update-downloaded", async (info) => {
+    updateReady = info.version;
+    buildMenu();
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      buttons: ["Restart to update", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      message: `Version ${info.version} is ready to install`,
+      detail: "Your data stays as it is. If you choose Later, it installs the next time you close the app.",
+    });
+    if (response === 0) installUpdateNow();
+  });
+  autoUpdater.on("update-not-available", () => {
+    if (manualCheck) dialog.showMessageBox(mainWindow, { type: "info", message: `You have the latest version (${app.getVersion()}).` });
+    manualCheck = false;
+  });
+  autoUpdater.on("error", (e) => {
+    fs.appendFileSync(logFile(), `[updater] ${e?.message ?? e}\n`);
+    if (manualCheck) dialog.showMessageBox(mainWindow, { type: "warning", message: "Couldn't check for updates", detail: "Check your internet connection and try again later." });
+    manualCheck = false;
+  });
+  autoUpdater.on("update-available", (info) => {
+    if (manualCheck) dialog.showMessageBox(mainWindow, { type: "info", message: `Version ${info.version} is downloading`, detail: "You'll be asked to restart when it's ready." });
+    manualCheck = false;
+  });
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  setTimeout(check, 15_000);
+  setInterval(check, 6 * 60 * 60 * 1000);
+}
+
+async function installUpdateNow() {
+  quitting = true;
+  await stopServer(); // close the database cleanly before the installer runs
+  serverProcess = null;
+  autoUpdater.quitAndInstall(false, true);
+}
+
+function checkForUpdatesNow() {
+  if (!app.isPackaged) {
+    dialog.showMessageBox(mainWindow, { type: "info", message: "Updates only work in the installed app." });
+    return;
+  }
+  if (updateReady) return installUpdateNow();
+  manualCheck = true;
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
 function buildMenu() {
   const template = [
     {
@@ -197,6 +257,10 @@ function buildMenu() {
     {
       label: "Help",
       submenu: [
+        updateReady
+          ? { label: `Restart to install version ${updateReady}`, click: installUpdateNow }
+          : { label: "Check for updates…", click: checkForUpdatesNow },
+        { type: "separator" },
         { label: "Open server log", click: () => shell.openPath(logFile()) },
         {
           label: `About ${APP_NAME}`,
@@ -257,6 +321,7 @@ async function createWindow() {
 app.whenReady().then(() => {
   buildMenu();
   createWindow();
+  setupUpdates();
 });
 
 app.on("before-quit", async (event) => {

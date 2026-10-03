@@ -29,7 +29,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Counterparty-Trust-Setup
-          path: desktop/dist/*.exe
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.blockmap
+            desktop/dist/latest.yml
       # On a version tag, or when a release tag is given, publish a release with the installer as a download.
       - if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         uses: softprops/action-gh-release@v2
@@ -37,7 +40,11 @@ jobs:
           tag_name: ${{ inputs.release || github.ref_name }}
           name: Counterparty Trust ${{ inputs.release || github.ref_name }}
           target_commitish: ${{ github.sha }}
-          files: desktop/dist/*.exe
+          # latest.yml and the blockmap let installed apps find and download this update.
+          files: |
+            desktop/dist/*.exe
+            desktop/dist/*.blockmap
+            desktop/dist/latest.yml
           body: |
             Windows installer for the Counterparty Trust workbench.
             Download **Counterparty-Trust-Setup-*.exe**, run it, then open Counterparty Trust from the Start menu.

@@ -41,6 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <form action={logoutAction} className="mt-2">
             <button className="text-muted underline hover:text-ink">Sign out</button>
           </form>
+          {process.env.APP_VERSION && <div className="mt-3 text-[11px] text-muted">Version {process.env.APP_VERSION}</div>}
         </div>
       </aside>
       <div className="flex-1">
