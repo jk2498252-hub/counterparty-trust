@@ -10,6 +10,9 @@ const securityHeaders = [
 
 const config: NextConfig = {
   poweredByHeader: false,
+  // The desktop build bundles a self-contained server (see desktop/README).
+  output: process.env.DESKTOP_BUILD === "1" ? "standalone" : undefined,
+  serverExternalPackages: ["@electric-sql/pglite", "pg"],
   experimental: { serverActions: { bodySizeLimit: "16mb" } },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

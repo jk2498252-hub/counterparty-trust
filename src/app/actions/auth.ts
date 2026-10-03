@@ -1,7 +1,7 @@
 "use server";
 
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -94,4 +94,25 @@ export async function changePasswordAction(fd: FormData) {
   await startSession({ ...u, sessionVersion }, u.mfaPassed);
   await audit(u.id, "auth.password_changed");
   back("/security", { ok: "Password changed. Other sessions were signed out." });
+}
+
+/** First run only: creates the first admin when there are no users at all. */
+export async function createFirstAdminAction(fd: FormData) {
+  const name = str(fd, "name");
+  const email = str(fd, "email").toLowerCase();
+  const password = str(fd, "password");
+  if (!name || !email.includes("@")) back("/setup", { err: "Enter your name and email." });
+  if (password.length < 12) back("/setup", { err: "Choose a password of at least 12 characters." });
+  if (password !== str(fd, "confirm")) back("/setup", { err: "The two passwords don't match." });
+  const passwordHash = await bcrypt.hash(password, 12);
+  const created = await db.transaction(async (tx) => {
+    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(users);
+    if (n > 0) return null;
+    const [u] = await tx.insert(users).values({ name, email, role: "ADMIN", passwordHash }).returning();
+    return u;
+  });
+  if (!created) redirect("/login");
+  await audit(created.id, "setup.first_admin_created");
+  await startSession(created, false);
+  redirect("/security");
 }

@@ -32,7 +32,15 @@ These come straight from the operating manual in the Trust Pack:
 - The analyst can't review or release their own case.
 - A changed bank instruction can't be confirmed using contact details from the request itself, and the person who logged it can't approve it.
 
-## Try it on your computer
+## Windows desktop app (easiest)
+
+Run **Counterparty-Trust-Setup.exe**, then open **Counterparty Trust** from the Start menu or desktop. No server, database or setup:
+the first screen asks you to create the admin account. Data stays on that computer (File → Back up data… to save a copy).
+Details in [desktop/README.md](desktop/README.md).
+
+Use the desktop app for a pilot on one computer. When several people on different computers need it, run the server version below.
+
+## Try it on your computer (developer setup)
 
 You need [Node.js 20+](https://nodejs.org) and [PostgreSQL 16](https://www.postgresql.org/download/) (or Docker).
 
@@ -77,5 +85,6 @@ Put it behind HTTPS (e.g. Caddy or a cloud load balancer). Back up the `db-data`
 - Files are stored on local disk. For more than one server, switch `src/lib/storage.ts` to S3-compatible storage.
 - No client portal yet: the team enters intake and sends reports by hand (print or save as PDF).
 - No live data connections yet (BRS, KRA, data vendors like Smile ID or Prembly). Checks are recorded manually, which is deliberate until source rights and costs are confirmed.
+- The Windows installer is not code-signed yet, so Windows shows a SmartScreen warning on first install.
 - Single organisation. Multi-tenant separation is needed before offering it to other firms.
 - Legal readiness (PSRA, ODPC registration, lawful basis, retention periods) is outside the software and must be settled with Kenyan counsel before live cases.

@@ -1,0 +1,74 @@
+{
+  "name": "counterparty-trust-desktop",
+  "productName": "Counterparty Trust",
+  "version": "0.1.0",
+  "description": "Pre-transaction supplier verification workbench (Kenya)",
+  "author": "KELIM",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "server": "node build.mjs",
+    "start": "electron .",
+    "dist:win": "node build.mjs && electron-builder --win nsis --x64",
+    "dist:linux": "node build.mjs && electron-builder --linux dir"
+  },
+  "build": {
+    "appId": "ke.counterparty-trust.workbench",
+    "productName": "Counterparty Trust",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "loading.html",
+      "assets/**"
+    ],
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "server/node_modules",
+        "to": "server/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Counterparty Trust",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Counterparty-Trust-Setup-${version}.exe"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "electronVersion": "44.5.1",
+    "publish": null
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  }
+}

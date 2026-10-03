@@ -25,7 +25,8 @@ export function mfaRequired(): boolean {
 const cookieBase = {
   httpOnly: true,
   sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
+  // Off only for the desktop app, which serves on this computer over http://127.0.0.1.
+  secure: process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "false",
   path: "/",
 };
 

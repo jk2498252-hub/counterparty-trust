@@ -8,3 +8,7 @@ next-env.d.ts
 coverage
 e2e/screens
 tsconfig.tsbuildinfo
+desktop/node_modules
+desktop/server
+desktop/dist
+desktop/electron-dist
