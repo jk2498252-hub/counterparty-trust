@@ -1,7 +1,7 @@
 // Builds the self-contained server that the desktop app runs.
 // Usage (from the repo root): node desktop/build.mjs
 import { execSync } from "node:child_process";
-import { cpSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, rmSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +30,17 @@ for (const pkg of ["@electric-sql/pglite", "drizzle-orm", "pg", "pg-pool", "pg-p
 }
 // Image optimisation is unused and its native binaries are platform-specific.
 for (const pkg of ["sharp", "@img"]) rmSync(path.join(out, "node_modules", pkg), { recursive: true, force: true });
+// Trim the download: source maps, type definitions and unused database extensions.
+const trim = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) trim(full);
+    else if (/\.(map|d\.ts|d\.cts|d\.mts)$/.test(entry.name)) rmSync(full);
+  }
+};
+trim(path.join(out, "node_modules"));
+const pgliteDist = path.join(out, "node_modules", "@electric-sql", "pglite", "dist");
+for (const f of readdirSync(pgliteDist)) if (f.endsWith(".tar.gz")) rmSync(path.join(pgliteDist, f));
 // Remove anything that must never ship.
 for (const f of [".env", ".env.local"]) rmSync(path.join(out, f), { force: true });
 rmSync(path.join(out, "storage"), { recursive: true, force: true });

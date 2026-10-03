@@ -65,7 +65,11 @@
       "icon": "assets/icon.png"
     },
     "electronVersion": "44.5.1",
-    "publish": null
+    "publish": null,
+    "electronLanguages": [
+      "en-US"
+    ],
+    "compression": "maximum"
   },
   "devDependencies": {
     "electron": "^44.5.1",
