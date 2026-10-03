@@ -39,5 +39,6 @@ jobs:
           (npm start > server.log 2>&1 &)
           npx wait-on http://localhost:3000/login --timeout 60000
           npm run test:e2e
+          node e2e/controls.mjs
       - if: failure()
         run: cat server.log || true

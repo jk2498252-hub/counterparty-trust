@@ -76,6 +76,8 @@ export function intakeBlockers(i: IntakeInput): string[] {
 export interface FindingForGate extends FindingInput {
   finding: string | null;
   evidenceCount: number;
+  /** Cited evidence whose source was actually examined (not access required, failed or not supplied). */
+  examinedEvidenceCount: number;
 }
 
 export interface SubmitInput {
@@ -101,6 +103,10 @@ export function submitBlockers(i: SubmitInput): string[] {
     }
     if (!f.finding?.trim()) out.push(`${f.layer}: finding text is empty`);
     if (f.evidenceCount < 1) out.push(`${f.layer}: no evidence cited (uncited findings cannot be released)`);
+    else if ((f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && f.examinedEvidenceCount < 1)
+      out.push(
+        `${f.layer}: marked ${f.status === "VERIFIED" ? "verified" : "partially verified"}, but none of its cited sources was examined. A source that was not accessed or not supplied cannot support a positive finding.`,
+      );
   }
   if (i.beneficiaryVerifiedWithoutConfirmation)
     out.push(
@@ -118,13 +124,16 @@ export interface ReviewInput {
   reviewerId: string;
   analystId: string | null;
   reviewerRole: "ADMIN" | "ANALYST" | "REVIEWER";
+  /** The reviewer has created or changed any content of this case (findings, evidence, intake, bank details…). */
+  reviewerAuthoredContent: boolean;
 }
 
-/** Who may review: a reviewer or admin who did not produce the case. */
+/** Who may review: a reviewer or admin who neither produced nor edited the case. */
 export function reviewBlockers(i: ReviewInput): string[] {
   const out: string[] = [];
   if (i.reviewerRole === "ANALYST") out.push("Only a reviewer or admin can review a case");
   if (i.reviewerId === i.analystId) out.push("The analyst who produced the case cannot review it");
+  else if (i.reviewerAuthoredContent) out.push("You have edited this case, so you cannot review it. Another reviewer must do it.");
   return out;
 }
 
@@ -135,10 +144,15 @@ export interface ReleaseInput {
   releaserId: string;
   releaserRole: "ADMIN" | "ANALYST" | "REVIEWER";
   latestReview: { result: "PASS" | "FAIL"; caseVersion: number; reviewerId: string } | null;
+  /** The person releasing has created or changed content of this case. */
+  releaserAuthoredContent: boolean;
+  /** The content gates re-checked at release time (same as before review). */
+  contentBlockers: string[];
 }
 
 export function releaseBlockers(i: ReleaseInput): string[] {
-  const out: string[] = [];
+  const out: string[] = [...i.contentBlockers];
+  if (i.releaserAuthoredContent && i.releaserId !== i.analystId) out.push("You have edited this case, so you cannot release it");
   if (i.status !== "READY_TO_RELEASE") out.push("Case is not ready to release");
   if (i.releaserRole === "ANALYST") out.push("Only a reviewer or admin can release a report");
   if (i.releaserId === i.analystId) out.push("The analyst cannot release their own case");

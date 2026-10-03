@@ -115,8 +115,13 @@ export function suggestOutcome(findings: FindingInput[], discrepancies: Discrepa
   return { outcome: "VERIFIED_WITHIN_SCOPE", reasons: ["All checked claims are verified with no open issues"] };
 }
 
-/** The analyst may choose the suggested outcome or a less favourable one, never a more favourable one. */
+/**
+ * The analyst may choose the suggested outcome or a more cautious one, never a more favourable one.
+ * "Material red flags" is an adverse statement about a supplier, so it is only allowed when the
+ * evidence itself supports it (an established material contradiction or a conflicting critical finding).
+ */
 export function isOutcomeAllowed(chosen: Outcome, suggested: Outcome | null): boolean {
   if (suggested === null) return false;
+  if (chosen === "MATERIAL_RED_FLAGS") return suggested === "MATERIAL_RED_FLAGS";
   return OUTCOME_RANK[chosen] <= OUTCOME_RANK[suggested];
 }

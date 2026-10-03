@@ -29,7 +29,11 @@ These come straight from the operating manual in the Trust Pack:
 - An established, unresolved material contradiction means **Material red flags**. A merely possible one stays insufficient evidence.
 - "Accepted with limitation" can't hide a critical issue.
 - The beneficiary layer can't be marked Verified unless bank details on the case are confirmed.
-- The analyst can't review or release their own case.
+- The analyst can't review or release their own case, and nor can anyone else who edited it.
+- A "Verified" finding must cite at least one source that was actually examined; a source marked access required, failed or not supplied can't support it.
+- "Material red flags" can only be chosen when an established contradiction or a conflicting critical finding supports it.
+- Any change that affects a case after review cancels the review: bank details logged, confirmed, rejected, revoked or superseded, or shared supplier details edited from another case.
+- Release re-checks every content rule, not just the review.
 - A changed bank instruction can't be confirmed using contact details from the request itself, and the person who logged it can't approve it.
 
 ## Windows desktop app (easiest)
@@ -76,7 +80,7 @@ Put it behind HTTPS (e.g. Caddy or a cloud load balancer). Back up the `db-data`
 - **Business rules** are pure functions with unit tests: `src/lib/outcome.ts`, `src/lib/workflow.ts`, `src/lib/payments.ts`, `src/lib/files.ts`, `src/lib/crypto.ts`.
 - **Checks guidance** lives in `src/lib/layers.ts`; edit it as the SOP evolves.
 - **Database schema:** `src/db/schema.ts`. After changing it, run `npm run db:generate` and commit the new file in `drizzle/`.
-- **Tests:** `npm test` (rules) and `npm run test:e2e` (a full case with three people in a real browser; needs the app running and demo users).
+- **Tests:** `npm test` (rules), `npm run test:e2e` (a full case with three people in a real browser; needs the app running and demo users), then `node e2e/controls.mjs` (tries to break the review and evidence controls).
 - **Every server action** calls `requireUser()` and validates its input; every case edit goes through `touchCase()`, which bumps the version and cancels any review.
 
 ## Known limits of v0.1 (next steps)

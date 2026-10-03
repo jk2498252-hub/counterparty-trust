@@ -19,7 +19,7 @@ import {
   users,
 } from "@/db/schema";
 import { LAYERS, LAYER_DEFINITIONS } from "./layers";
-import { editInvalidatesReview, isEditable, type CaseStatus } from "./workflow";
+import { editInvalidatesReview, isEditable, type CaseStatus, type SubmitInput } from "./workflow";
 import { audit } from "./audit";
 
 export async function nextReference(): Promise<string> {
@@ -70,6 +70,12 @@ export async function loadCase(id: string) {
 
   const userName = (uid: string | null | undefined) => userRows.find((u) => u.id === uid)?.name ?? "—";
 
+  const authorRows = await db
+    .selectDistinct({ actorId: auditEvents.actorId })
+    .from(auditEvents)
+    .where(and(eq(auditEvents.caseId, id), inArray(auditEvents.action, [...AUTHORING_ACTIONS])));
+  const authorIds = authorRows.map((r) => r.actorId).filter((x): x is string => !!x);
+
   return {
     ...row.c,
     client: row.client,
@@ -85,6 +91,30 @@ export async function loadCase(id: string) {
     reports: reportRows,
     users: userRows,
     userName,
+    authorIds,
+  };
+}
+
+/** The inputs for the "ready for review" gate, built from a loaded case. Used at submit and again at release. */
+export function submitInputFor(c: LoadedCase): SubmitInput {
+  const examined = new Set(c.evidence.filter((e) => e.accessResult === "EXAMINED").map((e) => e.id));
+  return {
+    findings: c.findings.map((f) => ({
+      layer: LAYER_DEFINITIONS[f.layer].title,
+      status: f.status,
+      critical: f.critical,
+      finding: f.finding,
+      evidenceCount: f.evidenceIds.length,
+      examinedEvidenceCount: f.evidenceIds.filter((id) => examined.has(id)).length,
+    })),
+    discrepancies: c.discrepancies,
+    outcome: c.outcome,
+    outcomeSummary: c.outcomeSummary,
+    commissioningAuthorityConfirmed: c.commissioningAuthorityConfirmed,
+    analystId: c.analystId,
+    beneficiaryVerifiedWithoutConfirmation:
+      c.findings.some((f) => f.layer === "TRANSACTION_BENEFICIARY" && f.status === "VERIFIED") &&
+      !c.payments.some((p) => p.status === "CONFIRMED_WITHIN_SCOPE"),
   };
 }
 
@@ -102,12 +132,20 @@ export async function loadAudit(caseId: string) {
 
 export class CaseLockedError extends Error {}
 
+/** Audit actions that mean "this person authored case content" (used to keep review independent). */
+export const AUTHORING_ACTIONS = ["case.created", "case.changed"] as const;
+
 /**
  * Call after every content change to a case. Bumps the version; if the case was
  * waiting for or had passed review, the review no longer applies and the case
  * returns to IN_PROGRESS.
+ *
+ * `authored` = the actor changed the case's content (so they may not review it).
+ * Use authored:false when the case is invalidated by someone else's independent
+ * action, e.g. a second person approving bank details.
  */
-export async function touchCase(caseId: string, actorId: string, what: string) {
+export async function touchCase(caseId: string, actorId: string, what: string, opts: { authored?: boolean } = {}) {
+  const authored = opts.authored ?? true;
   const [c] = await db.select({ status: cases.status, version: cases.version }).from(cases).where(eq(cases.id, caseId));
   if (!c) throw new CaseLockedError("Case not found");
   const status = c.status as CaseStatus;
@@ -117,7 +155,22 @@ export async function touchCase(caseId: string, actorId: string, what: string) {
     .update(cases)
     .set({ version: c.version + 1, updatedAt: new Date(), ...(invalidate ? { status: "IN_PROGRESS" as const } : {}) })
     .where(eq(cases.id, caseId));
-  await audit(actorId, "case.changed", { what, version: c.version + 1, reviewInvalidated: invalidate }, caseId);
+  await audit(actorId, authored ? "case.changed" : "case.invalidated", { what, version: c.version + 1, reviewInvalidated: invalidate }, caseId);
+}
+
+/** Like touchCase, but silently skips cases that are released, closed or cancelled. */
+export async function touchCaseIfEditable(caseId: string, actorId: string, what: string, opts: { authored?: boolean } = {}) {
+  try {
+    await touchCase(caseId, actorId, what, opts);
+  } catch (e) {
+    if (!(e instanceof CaseLockedError)) throw e;
+  }
+}
+
+/** Supplier details are shared: changing them changes every open case for that supplier. */
+export async function touchOtherCasesForCounterparty(counterpartyId: string, exceptCaseId: string, actorId: string, what: string) {
+  const rows = await db.select({ id: cases.id }).from(cases).where(eq(cases.counterpartyId, counterpartyId));
+  for (const r of rows) if (r.id !== exceptCaseId) await touchCaseIfEditable(r.id, actorId, what);
 }
 
 export async function assertEditable(caseId: string) {

@@ -10,6 +10,7 @@ import { paymentApprovalsRequired } from "@/lib/env";
 import { back, bool, isUuid, optStr, str } from "@/lib/nav";
 import { approvalBlockers, confirmationBlockers, initialStatus, isPending, lastFour, statusAfterApproval, type PaymentStatus } from "@/lib/payments";
 import { requireUser } from "@/lib/session";
+import { touchCaseIfEditable } from "@/lib/cases";
 
 function idFrom(fd: FormData): string {
   const id = str(fd, "id");
@@ -68,6 +69,7 @@ export async function createInstructionAction(fd: FormData) {
     })
     .returning();
   await audit(user.id, "payment.logged", { instructionId: p.id, isChange, last4: p.accountLast4 }, caseId);
+  if (caseId) await touchCaseIfEditable(caseId, user.id, "bank details logged");
   redirect(url(p.id));
 }
 
@@ -99,6 +101,7 @@ export async function recordConfirmationAction(fd: FormData) {
   // A new confirmation replaces any earlier one, so earlier approvals no longer apply.
   await db.delete(paymentApprovals).where(eq(paymentApprovals.instructionId, id));
   await audit(user.id, "payment.confirmation_recorded", { instructionId: id, channel: input.confirmationChannel }, p.caseId);
+  if (p.caseId) await touchCaseIfEditable(p.caseId, user.id, "bank confirmation recorded");
   back(url(id), { ok: "Confirmation recorded. Two different people now need to approve it." });
 }
 
@@ -122,8 +125,21 @@ export async function approveInstructionAction(fd: FormData) {
   const next = statusAfterApproval(p.status as PaymentStatus, approvals.length + 1, paymentApprovalsRequired);
   if (next !== p.status) {
     await db.update(paymentInstructions).set({ status: next, updatedAt: new Date() }).where(eq(paymentInstructions.id, id));
+    if (p.caseId) await touchCaseIfEditable(p.caseId, user.id, "bank details confirmed", { authored: false });
     if (next === "CONFIRMED_WITHIN_SCOPE") {
-      // The earlier confirmed instruction for this supplier is now superseded.
+      // The earlier confirmed instruction for this supplier is now superseded,
+      // so any open case relying on it must be reviewed again.
+      const superseded = await db
+        .select({ caseId: paymentInstructions.caseId })
+        .from(paymentInstructions)
+        .where(
+          and(
+            eq(paymentInstructions.counterpartyId, p.counterpartyId),
+            eq(paymentInstructions.status, "CONFIRMED_WITHIN_SCOPE"),
+            ne(paymentInstructions.id, id),
+          ),
+        );
+      for (const s of superseded) if (s.caseId) await touchCaseIfEditable(s.caseId, user.id, "earlier bank details superseded", { authored: false });
       await db
         .update(paymentInstructions)
         .set({ status: "SUPERSEDED", updatedAt: new Date() })
@@ -149,6 +165,7 @@ export async function rejectInstructionAction(fd: FormData) {
   if (!p || !isPending(p.status as PaymentStatus)) back(url(id), { err: "Only a pending instruction can be rejected." });
   await db.update(paymentInstructions).set({ status: "REJECTED", decisionNote: note, updatedAt: new Date() }).where(eq(paymentInstructions.id, id));
   await audit(user.id, "payment.rejected", { instructionId: id }, p.caseId);
+  if (p.caseId) await touchCaseIfEditable(p.caseId, user.id, "bank details rejected", { authored: false });
   back(url(id), { ok: "Instruction rejected." });
 }
 
@@ -161,5 +178,6 @@ export async function revokeInstructionAction(fd: FormData) {
   if (!p || p.status !== "CONFIRMED_WITHIN_SCOPE") back(url(id), { err: "Only a confirmed instruction can be revoked." });
   await db.update(paymentInstructions).set({ status: "REVOKED", decisionNote: note, updatedAt: new Date() }).where(eq(paymentInstructions.id, id));
   await audit(user.id, "payment.revoked", { instructionId: id }, p.caseId);
+  if (p.caseId) await touchCaseIfEditable(p.caseId, user.id, "bank confirmation revoked", { authored: false });
   back(url(id), { ok: "Confirmation revoked." });
 }

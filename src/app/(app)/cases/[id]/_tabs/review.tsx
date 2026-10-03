@@ -2,13 +2,18 @@ import Link from "next/link";
 import { releaseAction, reviewAction } from "@/app/actions/cases";
 import { Badge, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
-import type { LoadedCase } from "@/lib/cases";
+import { submitInputFor, type LoadedCase } from "@/lib/cases";
 import { dateTimeStr } from "@/lib/format";
 import type { SessionUser } from "@/lib/session";
-import { QC_CHECKLIST, releaseBlockers, reviewBlockers, type CaseStatus } from "@/lib/workflow";
+import { QC_CHECKLIST, releaseBlockers, reviewBlockers, submitBlockers, type CaseStatus } from "@/lib/workflow";
 
 export function ReviewTab({ c, user }: { c: LoadedCase; user: SessionUser }) {
-  const reviewProblems = reviewBlockers({ reviewerId: user.id, analystId: c.analystId, reviewerRole: user.role });
+  const reviewProblems = reviewBlockers({
+    reviewerId: user.id,
+    analystId: c.analystId,
+    reviewerRole: user.role,
+    reviewerAuthoredContent: c.authorIds.includes(user.id),
+  });
   const latest = c.reviews[0];
   const releaseProblems = releaseBlockers({
     status: c.status as CaseStatus,
@@ -17,6 +22,8 @@ export function ReviewTab({ c, user }: { c: LoadedCase; user: SessionUser }) {
     releaserId: user.id,
     releaserRole: user.role,
     latestReview: latest ? { result: latest.result, caseVersion: latest.caseVersion, reviewerId: latest.reviewerId } : null,
+    releaserAuthoredContent: c.authorIds.includes(user.id),
+    contentBlockers: submitBlockers(submitInputFor(c)),
   });
 
   return (

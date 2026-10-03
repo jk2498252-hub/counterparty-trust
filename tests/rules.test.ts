@@ -63,7 +63,7 @@ describe("outcome engine", () => {
 
   it("analyst cannot pick a more favourable outcome than the evidence allows", () => {
     expect(isOutcomeAllowed("VERIFIED_WITHIN_SCOPE", "INSUFFICIENT_EVIDENCE")).toBe(false);
-    expect(isOutcomeAllowed("MATERIAL_RED_FLAGS", "INSUFFICIENT_EVIDENCE")).toBe(true);
+    expect(isOutcomeAllowed("INSUFFICIENT_EVIDENCE", "VERIFIED_WITH_ISSUES")).toBe(true);
     expect(isOutcomeAllowed("INSUFFICIENT_EVIDENCE", "INSUFFICIENT_EVIDENCE")).toBe(true);
     expect(isOutcomeAllowed("INSUFFICIENT_EVIDENCE", "MATERIAL_RED_FLAGS")).toBe(false);
     expect(isOutcomeAllowed("INSUFFICIENT_EVIDENCE", null)).toBe(false);
@@ -72,7 +72,7 @@ describe("outcome engine", () => {
 
 describe("workflow gates", () => {
   const base = {
-    findings: all("VERIFIED").map((f) => ({ ...f, finding: "ok", evidenceCount: 1 })),
+    findings: all("VERIFIED").map((f) => ({ ...f, finding: "ok", evidenceCount: 1, examinedEvidenceCount: 1 })),
     discrepancies: [],
     outcome: "VERIFIED_WITHIN_SCOPE" as const,
     outcomeSummary: "Verified.",
@@ -95,9 +95,9 @@ describe("workflow gates", () => {
   });
 
   it("analyst cannot review or release their own case", () => {
-    expect(reviewBlockers({ reviewerId: "a1", analystId: "a1", reviewerRole: "REVIEWER" })).not.toEqual([]);
-    expect(reviewBlockers({ reviewerId: "r1", analystId: "a1", reviewerRole: "ANALYST" })).not.toEqual([]);
-    expect(reviewBlockers({ reviewerId: "r1", analystId: "a1", reviewerRole: "REVIEWER" })).toEqual([]);
+    expect(reviewBlockers({ reviewerId: "a1", analystId: "a1", reviewerRole: "REVIEWER", reviewerAuthoredContent: false })).not.toEqual([]);
+    expect(reviewBlockers({ reviewerId: "r1", analystId: "a1", reviewerRole: "ANALYST", reviewerAuthoredContent: false })).not.toEqual([]);
+    expect(reviewBlockers({ reviewerId: "r1", analystId: "a1", reviewerRole: "REVIEWER", reviewerAuthoredContent: false })).toEqual([]);
   });
 
   it("a change after review blocks release", () => {
@@ -108,6 +108,8 @@ describe("workflow gates", () => {
       releaserId: "r1",
       releaserRole: "REVIEWER",
       latestReview: { result: "PASS", caseVersion: 4, reviewerId: "r1" },
+      releaserAuthoredContent: false,
+      contentBlockers: [],
     });
     expect(r.join()).toMatch(/changed after review/);
   });
@@ -121,6 +123,8 @@ describe("workflow gates", () => {
         releaserId: "r1",
         releaserRole: "REVIEWER",
         latestReview: { result: "PASS", caseVersion: 5, reviewerId: "r1" },
+        releaserAuthoredContent: false,
+        contentBlockers: [],
       }),
     ).toEqual([]);
   });
@@ -196,7 +200,7 @@ describe("uploads and crypto", () => {
 
 describe("beneficiary guard", () => {
   it("cannot send a case for review with an unconfirmed beneficiary marked verified", () => {
-    const findings = all("VERIFIED").map((f) => ({ ...f, finding: "ok", evidenceCount: 1 }));
+    const findings = all("VERIFIED").map((f) => ({ ...f, finding: "ok", evidenceCount: 1, examinedEvidenceCount: 1 }));
     const r = submitBlockers({
       findings,
       discrepancies: [],
@@ -207,5 +211,63 @@ describe("beneficiary guard", () => {
       beneficiaryVerifiedWithoutConfirmation: true,
     });
     expect(r.join()).toMatch(/no bank details on this case are confirmed/);
+  });
+});
+
+describe("independent-review and evidence fixes", () => {
+  const base = {
+    findings: all("VERIFIED").map((f) => ({ ...f, finding: "ok", evidenceCount: 1, examinedEvidenceCount: 1 })),
+    discrepancies: [],
+    outcome: "VERIFIED_WITHIN_SCOPE" as const,
+    outcomeSummary: "Verified.",
+    commissioningAuthorityConfirmed: true,
+    analystId: "a1",
+  };
+
+  it("a source that was not examined cannot support a verified finding", () => {
+    const f = base.findings.map((x, i) => (i === 0 ? { ...x, examinedEvidenceCount: 0 } : x));
+    expect(submitBlockers({ ...base, findings: f }).join()).toMatch(/none of its cited sources was examined/);
+  });
+
+  it("a missing source may still support an unresolved finding", () => {
+    const f = base.findings.map((x) => (x.layer === "DIGITAL_IDENTITY" ? { ...x, status: "NOT_AVAILABLE" as const, examinedEvidenceCount: 0 } : x));
+    const r = submitBlockers({ ...base, findings: f, outcome: "VERIFIED_WITH_ISSUES" });
+    expect(r.join()).not.toMatch(/examined/);
+  });
+
+  it("material red flags needs a supporting contradiction", () => {
+    expect(isOutcomeAllowed("MATERIAL_RED_FLAGS", "VERIFIED_WITHIN_SCOPE")).toBe(false);
+    expect(isOutcomeAllowed("MATERIAL_RED_FLAGS", "INSUFFICIENT_EVIDENCE")).toBe(false);
+    expect(isOutcomeAllowed("MATERIAL_RED_FLAGS", "MATERIAL_RED_FLAGS")).toBe(true);
+    expect(submitBlockers({ ...base, outcome: "MATERIAL_RED_FLAGS" }).join()).toMatch(/evidence allows/);
+  });
+
+  it("a reviewer who edited the case cannot review or release it", () => {
+    expect(reviewBlockers({ reviewerId: "r1", analystId: "a1", reviewerRole: "REVIEWER", reviewerAuthoredContent: true }).join()).toMatch(/edited this case/);
+    const r = releaseBlockers({
+      status: "READY_TO_RELEASE",
+      caseVersion: 5,
+      analystId: "a1",
+      releaserId: "r2",
+      releaserRole: "REVIEWER",
+      latestReview: { result: "PASS", caseVersion: 5, reviewerId: "r1" },
+      releaserAuthoredContent: true,
+      contentBlockers: [],
+    });
+    expect(r.join()).toMatch(/edited this case/);
+  });
+
+  it("release re-checks the content gates", () => {
+    const r = releaseBlockers({
+      status: "READY_TO_RELEASE",
+      caseVersion: 5,
+      analystId: "a1",
+      releaserId: "r1",
+      releaserRole: "REVIEWER",
+      latestReview: { result: "PASS", caseVersion: 5, reviewerId: "r1" },
+      releaserAuthoredContent: false,
+      contentBlockers: ["Transaction and beneficiary is marked Verified, but no bank details on this case are confirmed."],
+    });
+    expect(r.join()).toMatch(/no bank details/);
   });
 });

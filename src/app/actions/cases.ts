@@ -18,7 +18,18 @@ import {
   timeEntries,
 } from "@/db/schema";
 import { audit } from "@/lib/audit";
-import { assertEditable, CaseLockedError, createFindingRows, findingBelongsToCase, loadCase, nextEvidenceCode, nextReference, touchCase } from "@/lib/cases";
+import {
+  assertEditable,
+  CaseLockedError,
+  createFindingRows,
+  findingBelongsToCase,
+  loadCase,
+  nextEvidenceCode,
+  nextReference,
+  submitInputFor,
+  touchCase,
+  touchOtherCasesForCounterparty,
+} from "@/lib/cases";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { economics } from "@/lib/env";
 import { checkUpload, safeDisplayName } from "@/lib/files";
@@ -200,6 +211,8 @@ export async function updateIntakeAction(fd: FormData) {
       })
       .where(eq(counterparties.id, c.counterpartyId));
     await touchCase(caseId, user.id, "intake");
+    // Supplier details are shared, so other open cases for this supplier must be re-reviewed too.
+    await touchOtherCasesForCounterparty(c.counterpartyId, caseId, user.id, `supplier details changed in ${c.reference}`);
   });
   back(caseUrl(caseId, "intake"), { ok: "Intake saved." });
 }
@@ -274,23 +287,7 @@ export async function changeStatusAction(fd: FormData) {
 
   if (to === "AWAITING_HUMAN_QC") {
     if (user.id !== c.analystId && user.role !== "ADMIN") back(caseUrl(caseId), { err: "Only the assigned analyst can send this case for review." });
-    const blockers = submitBlockers({
-      findings: c.findings.map((f) => ({
-        layer: LAYER_DEFINITIONS[f.layer].title,
-        status: f.status,
-        critical: f.critical,
-        finding: f.finding,
-        evidenceCount: f.evidenceIds.length,
-      })),
-      discrepancies: c.discrepancies,
-      outcome: c.outcome,
-      outcomeSummary: c.outcomeSummary,
-      commissioningAuthorityConfirmed: c.commissioningAuthorityConfirmed,
-      analystId: c.analystId,
-      beneficiaryVerifiedWithoutConfirmation:
-        c.findings.some((f) => f.layer === "TRANSACTION_BENEFICIARY" && f.status === "VERIFIED") &&
-        !c.payments.some((p) => p.status === "CONFIRMED_WITHIN_SCOPE"),
-    });
+    const blockers = submitBlockers(submitInputFor(c));
     if (blockers.length) back(caseUrl(caseId, "outcome"), { err: `Not ready for review:\n${blockers.join("\n")}` });
   }
 
@@ -565,10 +562,15 @@ export async function setOutcomeAction(fd: FormData) {
 export async function reviewAction(fd: FormData) {
   const user = await requireUser({ roles: ["ADMIN", "REVIEWER"] });
   const caseId = caseIdFrom(fd);
-  const [c] = await db.select().from(cases).where(eq(cases.id, caseId));
+  const c = await loadCase(caseId);
   if (!c) back("/cases", { err: "Case not found" });
   if (c.status !== "AWAITING_HUMAN_QC") back(caseUrl(caseId, "review"), { err: "This case is not waiting for review." });
-  const blockers = reviewBlockers({ reviewerId: user.id, analystId: c.analystId, reviewerRole: user.role });
+  const blockers = reviewBlockers({
+    reviewerId: user.id,
+    analystId: c.analystId,
+    reviewerRole: user.role,
+    reviewerAuthoredContent: c.authorIds.includes(user.id),
+  });
   if (blockers.length) back(caseUrl(caseId, "review"), { err: blockers.join("\n") });
 
   const reviewedVersion = Number(str(fd, "caseVersion"));
@@ -604,6 +606,8 @@ export async function releaseAction(fd: FormData) {
     releaserId: user.id,
     releaserRole: user.role,
     latestReview: latest ? { result: latest.result, caseVersion: latest.caseVersion, reviewerId: latest.reviewerId } : null,
+    releaserAuthoredContent: c.authorIds.includes(user.id),
+    contentBlockers: submitBlockers(submitInputFor(c)),
   });
   if (blockers.length) back(caseUrl(caseId, "review"), { err: blockers.join("\n") });
 

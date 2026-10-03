@@ -276,5 +276,7 @@ await page.goto(`${caseUrl}?tab=history`);
 await shot("06-history");
 
 writeFileSync(`${SHOTS}/result.txt`, `passed ${step} steps\n`);
+// Shared with e2e/controls.mjs, which continues with the same accounts.
+writeFileSync(`${SHOTS}/mfa-secrets.json`, JSON.stringify(secrets));
 console.log(`\nAll ${step} end-to-end checks passed.`);
 await browser.close();
