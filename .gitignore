@@ -1,0 +1,10 @@
+node_modules
+.next
+.env
+.env.local
+storage/
+*.log
+next-env.d.ts
+coverage
+e2e/screens
+tsconfig.tsbuildinfo

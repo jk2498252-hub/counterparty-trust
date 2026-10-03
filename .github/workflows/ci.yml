@@ -1,0 +1,43 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kct
+          POSTGRES_PASSWORD: kct
+          POSTGRES_DB: kct
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://kct:kct@localhost:5432/kct
+      SESSION_SECRET: ci-only-session-secret-that-is-long-enough-123
+      DATA_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run db:migrate
+      - run: npm run build
+      - name: End-to-end walkthrough
+        run: |
+          npm run demo:users
+          npx playwright install --with-deps chromium
+          (npm start > server.log 2>&1 &)
+          npx wait-on http://localhost:3000/login --timeout 60000
+          npm run test:e2e
+      - if: failure()
+        run: cat server.log || true

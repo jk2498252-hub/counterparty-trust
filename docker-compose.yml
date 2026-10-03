@@ -1,0 +1,37 @@
+# Runs the app and a PostgreSQL database on one machine.
+#   1. Copy .env.example to .env and fill in SESSION_SECRET and DATA_ENCRYPTION_KEY.
+#   2. docker compose up -d --build
+#   3. docker compose exec app npm run user:create -- --email you@example.com --name "Your Name" --role ADMIN
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kct
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: kct
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kct"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://kct:${POSTGRES_PASSWORD:-change-me}@db:5432/kct
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/data/uploads
+
+volumes:
+  db-data:
+  uploads:
