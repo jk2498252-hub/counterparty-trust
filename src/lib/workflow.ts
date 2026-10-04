@@ -78,6 +78,8 @@ export interface FindingForGate extends FindingInput {
   evidenceCount: number;
   /** Cited evidence whose source was actually examined (not access required, failed or not supplied). */
   examinedEvidenceCount: number;
+  /** Examined sources with a recorded, unexpired validity/recheck policy. */
+  usableEvidenceCount?: number;
 }
 
 export interface SubmitInput {
@@ -107,12 +109,14 @@ export function submitBlockers(i: SubmitInput): string[] {
       out.push(
         `${f.layer}: marked ${f.status === "VERIFIED" ? "verified" : "partially verified"}, but none of its cited sources was examined. A source that was not accessed or not supplied cannot support a positive finding.`,
       );
+    if ((f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && f.usableEvidenceCount === 0 && f.examinedEvidenceCount > 0)
+      out.push(`${f.layer}: positive finding has no current source with a recorded validity policy. Recheck expired sources and record source expiry or a justified recheck date.`);
   }
   if (i.beneficiaryVerifiedWithoutConfirmation)
     out.push(
       "Transaction and beneficiary is marked Verified, but no bank details on this case are confirmed. Confirm them under Bank details, or change the result.",
     );
-  const suggestion = suggestOutcome(i.findings, i.discrepancies);
+  const suggestion = suggestOutcome(i.findings.map(f => ({ ...f, status: (f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && f.usableEvidenceCount === 0 ? "UNRESOLVED" as const : f.status })), i.discrepancies);
   if (!i.outcome) out.push("No outcome selected");
   else if (!isOutcomeAllowed(i.outcome, suggestion.outcome))
     out.push(`Selected outcome is more favourable than the evidence allows (${suggestion.outcome ?? "incomplete"})`);

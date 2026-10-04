@@ -22,6 +22,7 @@ import { LAYERS, LAYER_DEFINITIONS } from "./layers";
 import { editInvalidatesReview, isEditable, type CaseStatus, type SubmitInput } from "./workflow";
 import { audit } from "./audit";
 import { todayNairobi } from "./format";
+import { buildSubmitInput } from "./case-readiness";
 
 export async function nextReference(): Promise<string> {
   const year = todayNairobi().slice(0, 4);
@@ -98,25 +99,7 @@ export async function loadCase(id: string) {
 
 /** The inputs for the "ready for review" gate, built from a loaded case. Used at submit and again at release. */
 export function submitInputFor(c: LoadedCase): SubmitInput {
-  const examined = new Set(c.evidence.filter((e) => e.accessResult === "EXAMINED").map((e) => e.id));
-  return {
-    findings: c.findings.map((f) => ({
-      layer: LAYER_DEFINITIONS[f.layer].title,
-      status: f.status,
-      critical: f.critical,
-      finding: f.finding,
-      evidenceCount: f.evidenceIds.length,
-      examinedEvidenceCount: f.evidenceIds.filter((id) => examined.has(id)).length,
-    })),
-    discrepancies: c.discrepancies,
-    outcome: c.outcome,
-    outcomeSummary: c.outcomeSummary,
-    commissioningAuthorityConfirmed: c.commissioningAuthorityConfirmed,
-    analystId: c.analystId,
-    beneficiaryVerifiedWithoutConfirmation:
-      c.findings.some((f) => f.layer === "TRANSACTION_BENEFICIARY" && f.status === "VERIFIED") &&
-      !c.payments.some((p) => p.status === "CONFIRMED_WITHIN_SCOPE"),
-  };
+  return buildSubmitInput(c);
 }
 
 export type LoadedCase = NonNullable<Awaited<ReturnType<typeof loadCase>>>;

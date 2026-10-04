@@ -2,8 +2,9 @@ import { setOutcomeAction } from "@/app/actions/cases";
 import { OutcomeBadge } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import type { LoadedCase } from "@/lib/cases";
-import { OUTCOME_LABELS, titled } from "@/lib/layers";
-import { isOutcomeAllowed, OUTCOME_RANK, suggestOutcome, type Outcome } from "@/lib/outcome";
+import { OUTCOME_LABELS } from "@/lib/layers";
+import { isOutcomeAllowed, OUTCOME_RANK, type Outcome } from "@/lib/outcome";
+import { caseSuggestion } from "@/lib/case-readiness";
 
 const MEANING: Record<Outcome, string> = {
   VERIFIED_WITHIN_SCOPE: "Every critical claim is established and nothing material is open. State scope, date and exclusions.",
@@ -13,7 +14,7 @@ const MEANING: Record<Outcome, string> = {
 };
 
 export function OutcomeTab({ c }: { c: LoadedCase }) {
-  const s = suggestOutcome(titled(c.findings), c.discrepancies);
+  const s = caseSuggestion(c);
   const options = (Object.keys(OUTCOME_RANK) as Outcome[]).sort((a, b) => OUTCOME_RANK[b] - OUTCOME_RANK[a]);
   return (
     <div className="grid gap-6 lg:grid-cols-3">

@@ -137,6 +137,8 @@ for (const [i, [src, cat, summary]] of evidenceRows.entries()) {
   await page.fill("#sourceName", src);
   await page.selectOption("#category", cat);
   await page.fill("#summary", summary);
+  await page.fill("#recheckOn", new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10));
+  await page.fill("#validityNote", "Fictional CI source; recheck for this test transaction within seven days.");
   if (i === 0) await page.setInputFiles("#file", { name: "cr12.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% test capture\n") });
   await press('button:has-text("Log evidence")');
   await expectFlash(/Evidence logged/, `evidence ${i + 1}`);

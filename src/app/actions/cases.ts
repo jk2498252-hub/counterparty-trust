@@ -38,11 +38,13 @@ import { checkUpload, MAX_UPLOAD_BYTES, safeDisplayName } from "@/lib/files";
 import { todayNairobi } from "@/lib/format";
 import { DISCREPANCY_CODES, LAYER_DEFINITIONS } from "@/lib/layers";
 import { back, bool, int, isUuid, optStr, str } from "@/lib/nav";
-import { isOutcomeAllowed, suggestOutcome, type Outcome } from "@/lib/outcome";
+import { isOutcomeAllowed, type Outcome } from "@/lib/outcome";
 import { buildReportData } from "@/lib/report";
 import { requireUser } from "@/lib/session";
 import { readStoredFile, saveFile } from "@/lib/storage";
 import { documentMatches } from "@/lib/integrity";
+import { caseSuggestion } from "@/lib/case-readiness";
+import { supplierMatches } from "@/lib/supplier-matching";
 import {
   canTransition,
   intakeBlockers,
@@ -75,7 +77,7 @@ function caseUrl(id: string, tab?: string) {
 
 function validDate(v: string | null): string | null {
   if (!v) return null;
-  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) && v >= "0001-01-01" && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v ? v : null;
 }
 
 function validUrl(v: string | null): string | null {
@@ -139,6 +141,8 @@ export async function createCaseAction(fd: FormData) {
         })
         .returning();
       counterpartyId = cp.id;
+      const candidates = supplierMatches(cp, await db.select().from(counterparties));
+      if (candidates.length) await audit(user.id, "supplier.match_candidates", { supplierId: cp.id, candidates: candidates.map(m => ({ id: m.supplier.id, reasons: m.reasons })) });
     } else if (!isUuid(counterpartyId)) back("/cases/new", { err: "Invalid supplier" });
 
     const decisionPurpose = str(fd, "decisionPurpose");
@@ -447,8 +451,11 @@ export async function addEvidenceAction(fd: FormData) {
     const sourceName = str(fd, "sourceName");
     const summary = str(fd, "summary");
     if (!sourceName || !summary) back(caseUrl(caseId, "evidence"), { err: "Source and summary are required." });
-    const checkedDate = validDate(optStr(fd, "checkedDate")) ?? todayNairobi();
+    const rawCheckedDate = optStr(fd, "checkedDate");
+    if (rawCheckedDate && !validDate(rawCheckedDate)) back(caseUrl(caseId, "evidence"), { err: "Enter a real source check date." });
+    const checkedDate = validDate(rawCheckedDate) ?? todayNairobi();
     if (checkedDate > todayNairobi()) back(caseUrl(caseId, "evidence"), { err: "The source check date cannot be in the future." });
+    const validity = validityFrom(fd, checkedDate, caseId);
     const rawUrl = optStr(fd, "url");
     const url = validUrl(rawUrl);
     if (rawUrl && !url) back(caseUrl(caseId, "evidence"), { err: "The link must start with http:// or https://" });
@@ -482,6 +489,7 @@ export async function addEvidenceAction(fd: FormData) {
         url,
         locator: optStr(fd, "locator"),
         checkedDate,
+        ...validity,
         summary,
         confidence: pick(CONFIDENCES, str(fd, "confidence"), "NOT_ASSESSED"),
         rightsNote: optStr(fd, "rightsNote"),
@@ -492,6 +500,37 @@ export async function addEvidenceAction(fd: FormData) {
     });
     if (err) back(caseUrl(caseId, "evidence"), { err });
     back(caseUrl(caseId, "evidence"), { ok: "Evidence logged." });
+  });
+}
+
+function validityFrom(fd: FormData, checkedDate: string, caseId: string) {
+  const validUntilRaw = optStr(fd, "validUntil");
+  const recheckRaw = optStr(fd, "recheckOn");
+  const validUntil = validDate(validUntilRaw);
+  const recheckOn = validDate(recheckRaw);
+  const validityNote = optStr(fd, "validityNote");
+  if ((validUntilRaw && !validUntil) || (recheckRaw && !recheckOn)) back(caseUrl(caseId, "evidence"), { err: "Enter real dates for source expiry and recheck." });
+  if (recheckOn && recheckOn < checkedDate) back(caseUrl(caseId, "evidence"), { err: "Recheck date cannot be before the recorded source check." });
+  if ((validUntil || recheckOn) && !validityNote) back(caseUrl(caseId, "evidence"), { err: "Explain the source expiry or the basis for the recheck date." });
+  return { validUntil, recheckOn, validityNote };
+}
+
+export async function updateEvidenceValidityAction(fd: FormData) {
+  return runWorkflow(async () => {
+    const user = await requireUser();
+    const caseId = caseIdFrom(fd);
+    const id = str(fd, "id");
+    await guarded(caseId, "evidence", async () => {
+      await assertEditable(caseId);
+      if (!isUuid(id)) back(caseUrl(caseId, "evidence"), { err: "Invalid evidence" });
+      const [source] = await db.select().from(evidence).where(and(eq(evidence.id, id), eq(evidence.caseId, caseId)));
+      if (!source) back(caseUrl(caseId, "evidence"), { err: "Evidence not found" });
+      const validity = validityFrom(fd, source.checkedDate, caseId);
+      await db.update(evidence).set(validity).where(eq(evidence.id, id));
+      await touchCase(caseId, user.id, `validity for ${source.code}`);
+      await audit(user.id, "evidence.validity_updated", { evidenceId: id, ...validity }, caseId);
+    });
+    back(caseUrl(caseId, "evidence"), { ok: "Validity saved. Changing it requires a new review." });
   });
 }
 
@@ -578,7 +617,7 @@ export async function setOutcomeAction(fd: FormData) {
     const c = await loadCase(caseId);
     if (!c) back("/cases", { err: "Case not found" });
     const chosen = str(fd, "outcome") ? (pick(OUTCOMES, str(fd, "outcome")) as Outcome) : null;
-    const suggestion = suggestOutcome(c.findings, c.discrepancies);
+    const suggestion = caseSuggestion(c);
     if (chosen && !isOutcomeAllowed(chosen, suggestion.outcome)) {
       back(caseUrl(caseId, "outcome"), {
         err: suggestion.outcome
@@ -625,6 +664,10 @@ export async function reviewAction(fd: FormData) {
       back(caseUrl(caseId, "review"), { err: "Tick every checklist item to pass, or return the case with the defects listed." });
     }
     if (result === "FAIL" && !defects) back(caseUrl(caseId, "review"), { err: "List the defects the analyst must fix." });
+    if (result === "PASS") {
+      const currentBlockers = [...submitBlockers(submitInputFor(c)), ...await captureBlockers(c)];
+      if (currentBlockers.length) back(caseUrl(caseId, "review"), { err: `Case checks must pass at review time:\n${currentBlockers.join("\n")}` });
+    }
 
     await db.insert(reviews).values({ caseId, reviewerId: user.id, caseVersion: c.version, result, checklist, defects });
     await db

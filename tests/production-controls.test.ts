@@ -18,7 +18,8 @@ import { audit } from "@/lib/audit";
 import { hasAnyUser, firstRunAllowed } from "@/lib/setup";
 import { createFirstAdminAction, loginAction, verifyMfaLoginAction, confirmMfaSetupAction } from "@/app/actions/auth";
 import { createUserAction } from "@/app/actions/team";
-import { createCaseAction, reviewAction, releaseAction, updateFindingAction } from "@/app/actions/cases";
+import { createCaseAction, reviewAction, releaseAction, updateFindingAction, addEvidenceAction, updateEvidenceValidityAction, setOutcomeAction } from "@/app/actions/cases";
+import * as format from "@/lib/format";
 import { createInstructionAction, recordConfirmationAction, approveInstructionAction } from "@/app/actions/payments";
 import { QC_CHECKLIST } from "@/lib/workflow";
 import { newMfaSetup, verifySetupSignature } from "@/lib/mfa";
@@ -181,6 +182,45 @@ describe("production workflow controls", () => {
     expect(releases.filter(url => url.includes("ok="))).toHaveLength(1);
     expect(releases.filter(url => url.includes("err="))).toHaveLength(1);
     expect(await db.select().from(reports).where(eq(reports.caseId, c.id))).toHaveLength(1);
+  }, 30_000);
+
+  it("invalidates review on a policy change and blocks positive support that lapses after review", async () => {
+    const clock = vi.spyOn(format, "todayNairobi").mockReturnValue("2030-03-01");
+    try {
+      await startSession(admin, true);
+      const url = await destination(createCaseAction(fd({ clientName: "Validity client", legalName: "Validity supplier", decisionPurpose: "Date-bound source review" })));
+      const id = url.split("/")[2].split("?")[0];
+      const [c] = await db.select().from(cases).where(eq(cases.id, id));
+      const fields = { caseId: id, sourceName: "Fictional examined source", summary: "Fictional verification details", checkedDate: "2030-03-01" };
+      expect(await destination(addEvidenceAction(fd({ ...fields, validUntil: "2030-02-30", validityNote: "Invalid test date" })))).toContain("err=");
+      expect(await db.select().from(evidence).where(eq(evidence.caseId, id))).toHaveLength(0);
+      expect(await destination(addEvidenceAction(fd({ ...fields, recheckOn: "2030-03-02" })))).toContain("err=");
+      expect(await destination(addEvidenceAction(fd({ ...fields, recheckOn: "2030-03-02", validityNote: "Fictional source policy for this test transaction" })))).toContain("ok=");
+      const [source] = await db.select().from(evidence).where(eq(evidence.caseId, id));
+      const rows = await db.update(findings).set({ status: "VERIFIED", finding: "Fictional current source supports this claim" }).where(eq(findings.caseId, id)).returning();
+      await db.insert(findingEvidence).values(rows.map(f => ({ findingId: f.id, evidenceId: source.id })));
+      await db.insert(paymentInstructions).values({ caseId: id, counterpartyId: c.counterpartyId, beneficiaryName: "Validity supplier", bankName: "Fixture bank", accountEnc: "test-fixture", accountLast4: "1234", sourceDescription: "Previously independently confirmed fixture", createdById: admin.id, status: "CONFIRMED_WITHIN_SCOPE" });
+      await db.update(cases).set({ commissioningAuthorityConfirmed: true, outcome: "VERIFIED_WITHIN_SCOPE", outcomeSummary: "Fictional current source", status: "AWAITING_HUMAN_QC" }).where(eq(cases.id, id));
+      const [reviewer] = await db.select().from(users).where(eq(users.email, "first-approver@example.test"));
+      const checklist = Object.fromEntries(QC_CHECKLIST.map(item => [`qc_${item.key}`, "true"]));
+      const pass = async () => {
+        const [current] = await db.select().from(cases).where(eq(cases.id, id));
+        await startSession(reviewer, true);
+        return destination(reviewAction(fd({ caseId: id, caseVersion: String(current.version), result: "PASS", ...checklist })));
+      };
+      expect(await pass()).toContain("ok=");
+      await startSession(admin, true);
+      expect(await destination(updateEvidenceValidityAction(fd({ caseId: id, id: source.id, recheckOn: "2030-03-03", validityNote: "Corrected fictional source policy; review again" })))).toContain("ok=");
+      const [invalidated] = await db.select().from(cases).where(eq(cases.id, id));
+      expect(invalidated.status).toBe("IN_PROGRESS");
+      await db.update(cases).set({ status: "AWAITING_HUMAN_QC" }).where(eq(cases.id, id));
+      expect(await pass()).toContain("ok=");
+      clock.mockReturnValue("2030-03-03");
+      expect(new URL(await destination(releaseAction(fd({ caseId: id }))), "http://test.local").searchParams.get("err")).toContain("no current source");
+      expect(await db.select().from(reports).where(eq(reports.caseId, id))).toHaveLength(0);
+      await startSession(admin, true);
+      expect(new URL(await destination(setOutcomeAction(fd({ caseId: id, outcome: "VERIFIED_WITHIN_SCOPE", outcomeSummary: "Unsupported positive claim" }))), "http://test.local").searchParams.get("err")).toContain("more favourable");
+    } finally { clock.mockRestore(); }
   }, 30_000);
 
   it("bounds enrolment signatures to the user, session version and five-minute expiry", async () => {

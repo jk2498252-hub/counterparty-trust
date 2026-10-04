@@ -15,6 +15,13 @@
       "when": 1791057188050,
       "tag": "0001_production_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791115228805,
+      "tag": "0002_evidence_validity",
+      "breakpoints": true
     }
   ]
 }

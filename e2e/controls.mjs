@@ -94,6 +94,8 @@ await press(statusForm("IN_PROGRESS"));
 for (const [src, access] of [["BRS official company search (CR12)", "EXAMINED"], ["KRA iTax TCC checker", "ACCESS_REQUIRED"]]) {
   await page.goto(`${c2}?tab=evidence`);
   await page.fill("#sourceName", src);
+  await page.fill("#recheckOn", new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10));
+  await page.fill("#validityNote", "Fictional CI source policy for this test transaction.");
   await page.selectOption("#accessResult", access);
   await page.fill("#summary", `${src}: controls test`);
   await press('button:has-text("Log evidence")');
@@ -130,7 +132,14 @@ for (const layer of ["TAX_COMPLIANCE", "DIGITAL_IDENTITY", "REPRESENTATIVE_AUTHO
   await setCheck(c2, layer, "VERIFIED", ["E01"]);
 await setCheck(c2, "LEGAL_IDENTITY", "VERIFIED", ["E02"]);
 await page.goto(`${c2}?tab=outcome`);
-await page.check('input[value="VERIFIED_WITHIN_SCOPE"]');
+const positive = page.locator('input[value="VERIFIED_WITHIN_SCOPE"]');
+if (!(await positive.isDisabled())) throw new Error("Unexamined evidence allowed a positive outcome");
+await positive.evaluate(input => input.removeAttribute("disabled"));
+await positive.check();
+await page.fill('textarea[name="outcomeSummary"]', "Controls test summary.");
+await press('button:has-text("Save outcome")');
+await expectFlash(/more favourable/, "server rejects unsupported positive outcome");
+await page.check('input[value="INSUFFICIENT_EVIDENCE"]');
 await page.fill('textarea[name="outcomeSummary"]', "Controls test summary.");
 await press('button:has-text("Save outcome")');
 await sendForReview(c2);

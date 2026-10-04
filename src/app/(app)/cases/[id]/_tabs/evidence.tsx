@@ -1,8 +1,10 @@
-import { addEvidenceAction, deleteEvidenceAction } from "@/app/actions/cases";
-import { Empty, Field } from "@/components/ui";
+import { addEvidenceAction, deleteEvidenceAction, updateEvidenceValidityAction } from "@/app/actions/cases";
+import { Badge, Empty, Field } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import type { LoadedCase } from "@/lib/cases";
 import { dateStr, label, todayNairobi } from "@/lib/format";
+import { evidenceState, EVIDENCE_STATE_LABELS } from "@/lib/evidence-policy";
+import { isEditable } from "@/lib/workflow";
 
 export function EvidenceTab({ c }: { c: LoadedCase }) {
   const citedBy = (id: string) => c.findings.filter((f) => f.evidenceIds.includes(id)).length;
@@ -18,11 +20,11 @@ export function EvidenceTab({ c }: { c: LoadedCase }) {
           <div className="overflow-x-auto">
             <table className="table">
               <thead>
-                <tr><th>Code</th><th>Source</th><th>Category</th><th>Access</th><th>Checked</th><th>What it shows</th><th>Cited</th><th /></tr>
+                <tr><th>Code</th><th>Source</th><th>Category</th><th>Access</th><th>Checked & validity</th><th>What it shows</th><th>Cited</th><th /></tr>
               </thead>
               <tbody>
                 {c.evidence.map((e) => (
-                  <tr key={e.id}>
+                  <tr key={e.id} id={`e-${e.id}`}>
                     <td className="font-mono font-semibold">{e.code}</td>
                     <td>
                       <div className="font-medium">{e.sourceName}</div>
@@ -39,7 +41,20 @@ export function EvidenceTab({ c }: { c: LoadedCase }) {
                     </td>
                     <td>{label(e.category)}</td>
                     <td>{label(e.accessResult)}</td>
-                    <td className="whitespace-nowrap">{dateStr(e.checkedDate)}</td>
+                    <td className="min-w-52">
+                      <div className="mb-1 whitespace-nowrap">{dateStr(e.checkedDate)}</div>
+                      <Badge color={["EXPIRED", "RECHECK_DUE", "INVALID"].includes(evidenceState(e)) ? "red" : evidenceState(e) === "CURRENT" ? "blue" : "amber"}>{EVIDENCE_STATE_LABELS[evidenceState(e)]}</Badge>
+                      {e.validUntil && <div className="mt-1 text-xs">Expires {dateStr(e.validUntil)}</div>}
+                      {e.recheckOn && <div className="text-xs">Recheck {dateStr(e.recheckOn)}</div>}
+                      {e.validityNote && <p className="mt-1 text-xs text-muted">{e.validityNote}</p>}
+                      {isEditable(c.status) && <details className="mt-2 text-xs"><summary className="cursor-pointer text-brand underline">Set validity</summary><form action={updateEvidenceValidityAction} className="mt-2 space-y-2">
+                        <input type="hidden" name="caseId" value={c.id} /><input type="hidden" name="id" value={e.id} />
+                        <label className="block">Source expiry<input aria-label={`${e.code} source expiry`} name="validUntil" type="date" className="input" defaultValue={e.validUntil ?? ""} /></label>
+                        <label className="block">Recheck on<input aria-label={`${e.code} recheck date`} name="recheckOn" type="date" className="input" min={e.checkedDate} defaultValue={e.recheckOn ?? ""} /></label>
+                        <label className="block">Basis<input aria-label={`${e.code} validity basis`} name="validityNote" className="input" defaultValue={e.validityNote ?? ""} /></label>
+                        <SubmitButton className="btn-secondary">Save validity</SubmitButton>
+                      </form></details>}
+                    </td>
                     <td className="max-w-sm">{e.summary}<div className="text-xs text-muted">Confidence: {label(e.confidence)}</div></td>
                     <td>{citedBy(e.id)}</td>
                     <td>
@@ -105,6 +120,9 @@ export function EvidenceTab({ c }: { c: LoadedCase }) {
           <Field label="Date checked" name="checkedDate">
             <input id="checkedDate" name="checkedDate" type="date" className="input" defaultValue={todayNairobi()} />
           </Field>
+          <Field label="Source expiry (if specified)" name="validUntil" hint="Use the date on the actual source; do not invent an expiry."><input id="validUntil" name="validUntil" type="date" className="input" /></Field>
+          <Field label="Recheck on" name="recheckOn" hint="Choose a justified date for this transaction or your approved source policy."><input id="recheckOn" name="recheckOn" type="date" className="input" /></Field>
+          <Field label="Validity basis" name="validityNote" hint="Record the source's expiry wording or the reason for your recheck date."><input id="validityNote" name="validityNote" className="input" /></Field>
           <Field label="Confidence" name="confidence">
             <select id="confidence" name="confidence" className="input" defaultValue="MEDIUM">
               <option value="HIGH">High</option>

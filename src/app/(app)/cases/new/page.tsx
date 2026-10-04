@@ -5,6 +5,7 @@ import { createCaseAction } from "@/app/actions/cases";
 import { Field, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { economics } from "@/lib/env";
+import { SupplierFields } from "@/components/supplier-fields";
 import { requireUser } from "@/lib/session";
 
 export default async function NewCasePage({ searchParams }: { searchParams: Promise<{ err?: string; counterpartyId?: string }> }) {
@@ -12,7 +13,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const [clientRows, supplierRows] = await Promise.all([
     db.select({ id: clients.id, name: clients.name }).from(clients).orderBy(asc(clients.name)),
-    db.select({ id: counterparties.id, name: counterparties.legalName, pin: counterparties.kraPin }).from(counterparties).orderBy(asc(counterparties.legalName)),
+    db.select().from(counterparties).orderBy(asc(counterparties.legalName)),
   ]);
   return (
     <>
@@ -38,30 +39,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
           </Field>
         </section>
 
-        <section className="card grid gap-4 md:grid-cols-2">
-          <h2 className="font-semibold md:col-span-2">Supplier</h2>
-          <Field label="Existing supplier" name="counterpartyId" hint="Reuse a profile from earlier cases">
-            <select id="counterpartyId" name="counterpartyId" className="input" defaultValue={sp.counterpartyId ?? "new"}>
-              <option value="new">+ New supplier</option>
-              {supplierRows.map((s) => <option key={s.id} value={s.id}>{s.name}{s.pin ? ` (${s.pin})` : ""}</option>)}
-            </select>
-          </Field>
-          <Field label="Supplier name as supplied" name="legalName">
-            <input id="legalName" name="legalName" className="input" />
-          </Field>
-          <Field label="Registration number (if known)" name="registrationNumber">
-            <input id="registrationNumber" name="registrationNumber" className="input font-mono" />
-          </Field>
-          <Field label="KRA PIN (if known)" name="kraPin">
-            <input id="kraPin" name="kraPin" className="input font-mono uppercase" />
-          </Field>
-          <Field label="Website domain" name="domain">
-            <input id="domain" name="domain" className="input" />
-          </Field>
-          <Field label="Sector" name="sector">
-            <input id="sector" name="sector" className="input" />
-          </Field>
-        </section>
+        <SupplierFields suppliers={supplierRows} selected={sp.counterpartyId} />
 
         <section className="card grid gap-4 md:grid-cols-2">
           <h2 className="font-semibold md:col-span-2">The decision</h2>
