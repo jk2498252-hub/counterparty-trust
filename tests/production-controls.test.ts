@@ -191,14 +191,19 @@ describe("production workflow controls", () => {
       const url = await destination(createCaseAction(fd({ clientName: "Validity client", legalName: "Validity supplier", decisionPurpose: "Date-bound source review" })));
       const id = url.split("/")[2].split("?")[0];
       const [c] = await db.select().from(cases).where(eq(cases.id, id));
-      const fields = { caseId: id, sourceName: "Fictional examined source", summary: "Fictional verification details", checkedDate: "2030-03-01" };
+      const fields = { caseId: id, sourceName: "Fictional examined source", category: "AUTHORITATIVE", summary: "Fictional verification details", checkedDate: "2030-03-01" };
       expect(await destination(addEvidenceAction(fd({ ...fields, validUntil: "2030-02-30", validityNote: "Invalid test date" })))).toContain("err=");
       expect(await db.select().from(evidence).where(eq(evidence.caseId, id))).toHaveLength(0);
       expect(await destination(addEvidenceAction(fd({ ...fields, recheckOn: "2030-03-02" })))).toContain("err=");
       expect(await destination(addEvidenceAction(fd({ ...fields, recheckOn: "2030-03-02", validityNote: "Fictional source policy for this test transaction" })))).toContain("ok=");
       const [source] = await db.select().from(evidence).where(eq(evidence.caseId, id));
+      // Each check needs its kind of source: an independent confirmation and the client's documents too.
+      const extra = await db.insert(evidence).values([
+        { caseId: id, code: "E02", sourceName: "Fictional independent call", category: "INDEPENDENT_CONFIRMATION" as const, accessResult: "EXAMINED" as const, checkedDate: "2030-03-01", recheckOn: "2030-03-03", validityNote: "Fictional policy", summary: "Confirmed", createdById: admin.id },
+        { caseId: id, code: "E03", sourceName: "Fictional client invoice", category: "CLIENT_SUPPLIED" as const, accessResult: "EXAMINED" as const, checkedDate: "2030-03-01", recheckOn: "2030-03-03", validityNote: "Fictional policy", summary: "Invoice", createdById: admin.id },
+      ]).returning();
       const rows = await db.update(findings).set({ status: "VERIFIED", finding: "Fictional current source supports this claim" }).where(eq(findings.caseId, id)).returning();
-      await db.insert(findingEvidence).values(rows.map(f => ({ findingId: f.id, evidenceId: source.id })));
+      await db.insert(findingEvidence).values(rows.flatMap(f => [source, ...extra].map(e => ({ findingId: f.id, evidenceId: e.id }))));
       await db.insert(paymentInstructions).values({ caseId: id, counterpartyId: c.counterpartyId, beneficiaryName: "Validity supplier", bankName: "Fixture bank", accountEnc: "test-fixture", accountLast4: "1234", sourceDescription: "Previously independently confirmed fixture", createdById: admin.id, status: "CONFIRMED_WITHIN_SCOPE" });
       await db.update(cases).set({ commissioningAuthorityConfirmed: true, outcome: "VERIFIED_WITHIN_SCOPE", outcomeSummary: "Fictional current source", status: "AWAITING_HUMAN_QC" }).where(eq(cases.id, id));
       const [reviewer] = await db.select().from(users).where(eq(users.email, "first-approver@example.test"));

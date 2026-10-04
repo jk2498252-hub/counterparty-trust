@@ -4,6 +4,8 @@ import { FindingBadge } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import type { LoadedCase } from "@/lib/cases";
 import { FINDING_STATUS_LABELS, LAYER_DEFINITIONS } from "@/lib/layers";
+import { findingSupportGaps } from "@/lib/evidence-policy";
+import { CATEGORY_LABELS, LAYER_SOURCE_REQUIREMENTS, type SourceCategory } from "@/lib/source-rules";
 
 export function ChecksTab({ c }: { c: LoadedCase }) {
   return (
@@ -27,6 +29,15 @@ export function ChecksTab({ c }: { c: LoadedCase }) {
               <FindingBadge status={f.status} />
             </div>
 
+            <p className="mb-3 text-sm">
+              <span className="font-medium">To mark this Verified, cite:</span>{" "}
+              {LAYER_SOURCE_REQUIREMENTS[f.layer].map((g) => g.label).join(", and ")}. Sources labelled Unverified never count.
+            </p>
+            {(f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && findingSupportGaps(f, c.evidence).length > 0 && (
+              <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Still missing: {findingSupportGaps(f, c.evidence).join(", and ")}. Until then this counts as unresolved.
+              </p>
+            )}
             <details className="mb-4 rounded-md bg-paper p-3 text-sm">
               <summary className="cursor-pointer font-medium">What to check</summary>
               <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -100,7 +111,7 @@ export function ChecksTab({ c }: { c: LoadedCase }) {
                         <input type="checkbox" name="evidenceIds" value={e.id} defaultChecked={f.evidenceIds.includes(e.id)} className="mt-1" />
                         <span>
                           <span className="font-mono font-semibold">{e.code}</span> {e.sourceName}
-                          <span className="text-muted"> · {e.accessResult.toLowerCase().replace(/_/g, " ")}</span>
+                          <span className="text-muted"> · {CATEGORY_LABELS[e.category as SourceCategory] ?? e.category} · {e.accessResult.toLowerCase().replace(/_/g, " ")}</span>
                         </span>
                       </label>
                     ))}

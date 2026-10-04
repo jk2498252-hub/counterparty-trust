@@ -45,7 +45,7 @@ describe("source validity and decision support", () => {
   it("keeps usable independent support when another cited source lapses", () => {
     const c = fixture();
     c.findings[0].evidenceIds.push("e2");
-    expect(evidenceDecisionFindings(c.findings, [...c.evidence, { ...source, id: "e2", validUntil: "2026-10-08" }], "2026-10-05")[0].status).toBe("VERIFIED");
+    expect(evidenceDecisionFindings(c.findings, [...c.evidence, { ...source, id: "e2", category: "AUTHORITATIVE", validUntil: "2026-10-08" }], "2026-10-05")[0].status).toBe("VERIFIED");
   });
 });
 

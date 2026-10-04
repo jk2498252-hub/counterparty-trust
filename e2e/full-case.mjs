@@ -131,14 +131,18 @@ const evidenceRows = [
   ["BRS official company search (CR12)", "AUTHORITATIVE", "Name and number match the invoice; status registered. Receipt BRS-TEST-1."],
   ["KRA iTax TCC checker", "AUTHORITATIVE", "TCC valid, expiry 2027-03-31, PIN matches entity."],
   ["Independent call to registered contact", "INDEPENDENT_CONFIRMATION", "Director confirmed J. Otieno's mandate for this order."],
+  ["Client-supplied invoice", "CLIENT_SUPPLIED", "Invoice INV-001 for KES 1,800,000 names the same entity, PIN and number."],
 ];
 for (const [i, [src, cat, summary]] of evidenceRows.entries()) {
   await page.goto(`${caseUrl}?tab=evidence`);
   await page.fill("#sourceName", src);
   await page.selectOption("#category", cat);
   await page.fill("#summary", summary);
-  await page.fill("#recheckOn", new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10));
-  await page.fill("#validityNote", "Fictional CI source; recheck for this test transaction within seven days.");
+  // The first source relies on the built-in standard (recheck after 30 days, filled in automatically).
+  if (i > 0) {
+    await page.fill("#recheckOn", new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10));
+    await page.fill("#validityNote", "Fictional CI source; recheck for this test transaction within seven days.");
+  }
   if (i === 0) await page.setInputFiles("#file", { name: "cr12.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% test capture\n") });
   await press('button:has-text("Log evidence")');
   await expectFlash(/Evidence logged/, `evidence ${i + 1}`);
@@ -149,7 +153,8 @@ await page.fill("#summary", "Should be refused");
 await page.setInputFiles("#file", { name: "invoice.pdf", mimeType: "application/pdf", buffer: Buffer.from([0x4d, 0x5a, 0x90, 0, 1, 2]) });
 await press('button:has-text("Log evidence")');
 await expectFlash(/does not match/, "fake pdf");
-log("3 evidence items logged; disguised executable refused");
+if (!(await page.content()).includes("Standard policy: registry searches")) fail("Standard validity should be filled in automatically");
+log("4 evidence items logged (standard validity filled in); disguised executable refused");
 
 // 6. Fill the seven checks
 await page.goto(`${caseUrl}?tab=checks`);
@@ -162,8 +167,10 @@ for (let i = 0; i < n; i++) {
   await s.locator('select[name="status"]').selectOption(layer === "DIGITAL_IDENTITY" ? "PARTIALLY_VERIFIED" : "VERIFIED");
   await s.locator('select[name="confidence"]').selectOption("HIGH");
   await s.locator('textarea[name="finding"]').fill(`Test finding for ${layer}, as of today.`);
-  await s.locator('input[name="evidenceIds"]').first().check();
-  if (layer === "REPRESENTATIVE_AUTHORITY") await s.locator('input[name="evidenceIds"]').nth(2).check();
+  // Each check cites the kind of source it requires.
+  if (layer === "REPRESENTATIVE_AUTHORITY" || layer === "TRANSACTION_BENEFICIARY") await s.locator('input[name="evidenceIds"]').nth(2).check();
+  else await s.locator('input[name="evidenceIds"]').first().check();
+  if (layer === "DOCUMENT_CONSISTENCY") await s.locator('input[name="evidenceIds"]').nth(3).check();
   await press(s.locator("button[type=submit]"));
   await expectFlash(/saved/, `finding ${layer}`);
 }

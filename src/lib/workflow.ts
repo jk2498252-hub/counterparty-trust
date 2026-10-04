@@ -80,6 +80,8 @@ export interface FindingForGate extends FindingInput {
   examinedEvidenceCount: number;
   /** Examined sources with a recorded, unexpired validity/recheck policy. */
   usableEvidenceCount?: number;
+  /** Kinds of source this check requires that its current cited sources don't provide. */
+  sourceGaps?: string[];
 }
 
 export interface SubmitInput {
@@ -110,13 +112,15 @@ export function submitBlockers(i: SubmitInput): string[] {
         `${f.layer}: marked ${f.status === "VERIFIED" ? "verified" : "partially verified"}, but none of its cited sources was examined. A source that was not accessed or not supplied cannot support a positive finding.`,
       );
     if ((f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && f.usableEvidenceCount === 0 && f.examinedEvidenceCount > 0)
-      out.push(`${f.layer}: positive finding has no current source with a recorded validity policy. Recheck expired sources and record source expiry or a justified recheck date.`);
+      out.push(`${f.layer}: positive finding has no current source that can support it. Recheck expired sources, record source expiry or a justified recheck date, and note that sources labelled Unverified never count.`);
+    else if ((f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && f.sourceGaps?.length)
+      out.push(`${f.layer}: a positive finding here needs ${f.sourceGaps.join(", and ")}. Cite one, or change the result.`);
   }
   if (i.beneficiaryVerifiedWithoutConfirmation)
     out.push(
       "Transaction and beneficiary is marked Verified, but no bank details on this case are confirmed. Confirm them under Bank details, or change the result.",
     );
-  const suggestion = suggestOutcome(i.findings.map(f => ({ ...f, status: (f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && f.usableEvidenceCount === 0 ? "UNRESOLVED" as const : f.status })), i.discrepancies);
+  const suggestion = suggestOutcome(i.findings.map(f => ({ ...f, status: (f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && (f.usableEvidenceCount === 0 || !!f.sourceGaps?.length) ? "UNRESOLVED" as const : f.status })), i.discrepancies);
   if (!i.outcome) out.push("No outcome selected");
   else if (!isOutcomeAllowed(i.outcome, suggestion.outcome))
     out.push(`Selected outcome is more favourable than the evidence allows (${suggestion.outcome ?? "incomplete"})`);
@@ -173,6 +177,7 @@ export function releaseBlockers(i: ReleaseInput): string[] {
 export const QC_CHECKLIST: { key: string; label: string }[] = [
   { key: "entity", label: "Exact intended entity and identifiers match; namesakes and group companies separated" },
   { key: "evidence", label: "Every material claim traces to examined evidence or an explicitly missing check" },
+  { key: "sources", label: "Each verified check cites the kind of source it requires, and every listed source-policy exception is justified" },
   { key: "dates", label: "Dates, sources, failed retrievals and paid-access gaps are recorded accurately" },
   { key: "tax", label: "KRA PIN / TCC / eTIMS results are current and attributed to the right entity" },
   { key: "authority", label: "Representative role and authority distinguished; independent channel documented" },

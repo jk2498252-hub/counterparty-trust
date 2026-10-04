@@ -44,6 +44,7 @@ import { requireUser } from "@/lib/session";
 import { readStoredFile, saveFile } from "@/lib/storage";
 import { documentMatches } from "@/lib/integrity";
 import { caseSuggestion } from "@/lib/case-readiness";
+import { addDays, MAX_VALIDITY_DAYS, standardValidity } from "@/lib/source-rules";
 import { supplierMatches } from "@/lib/supplier-matching";
 import {
   canTransition,
@@ -455,7 +456,7 @@ export async function addEvidenceAction(fd: FormData) {
     if (rawCheckedDate && !validDate(rawCheckedDate)) back(caseUrl(caseId, "evidence"), { err: "Enter a real source check date." });
     const checkedDate = validDate(rawCheckedDate) ?? todayNairobi();
     if (checkedDate > todayNairobi()) back(caseUrl(caseId, "evidence"), { err: "The source check date cannot be in the future." });
-    const validity = validityFrom(fd, checkedDate, caseId);
+    const validity = validityFrom(fd, checkedDate, caseId, sourceName);
     const rawUrl = optStr(fd, "url");
     const url = validUrl(rawUrl);
     if (rawUrl && !url) back(caseUrl(caseId, "evidence"), { err: "The link must start with http:// or https://" });
@@ -503,14 +504,23 @@ export async function addEvidenceAction(fd: FormData) {
   });
 }
 
-function validityFrom(fd: FormData, checkedDate: string, caseId: string) {
+function validityFrom(fd: FormData, checkedDate: string, caseId: string, sourceName: string) {
   const validUntilRaw = optStr(fd, "validUntil");
   const recheckRaw = optStr(fd, "recheckOn");
   const validUntil = validDate(validUntilRaw);
-  const recheckOn = validDate(recheckRaw);
-  const validityNote = optStr(fd, "validityNote");
+  let recheckOn = validDate(recheckRaw);
+  let validityNote = optStr(fd, "validityNote");
   if ((validUntilRaw && !validUntil) || (recheckRaw && !recheckOn)) back(caseUrl(caseId, "evidence"), { err: "Enter real dates for source expiry and recheck." });
   if (recheckOn && recheckOn < checkedDate) back(caseUrl(caseId, "evidence"), { err: "Recheck date cannot be before the recorded source check." });
+  const latest = addDays(checkedDate, MAX_VALIDITY_DAYS);
+  if ((validUntil && validUntil > latest) || (recheckOn && recheckOn > latest))
+    back(caseUrl(caseId, "evidence"), { err: "That date is more than three years after the check. Enter the real expiry or a realistic recheck date." });
+  // Standard sources get the standard recheck date automatically; only departures need explaining.
+  const standard = standardValidity(sourceName, checkedDate);
+  if (standard && !recheckOn) {
+    recheckOn = standard.recheckOn;
+    if (!validityNote) validityNote = standard.validityNote;
+  }
   if ((validUntil || recheckOn) && !validityNote) back(caseUrl(caseId, "evidence"), { err: "Explain the source expiry or the basis for the recheck date." });
   return { validUntil, recheckOn, validityNote };
 }
@@ -525,7 +535,7 @@ export async function updateEvidenceValidityAction(fd: FormData) {
       if (!isUuid(id)) back(caseUrl(caseId, "evidence"), { err: "Invalid evidence" });
       const [source] = await db.select().from(evidence).where(and(eq(evidence.id, id), eq(evidence.caseId, caseId)));
       if (!source) back(caseUrl(caseId, "evidence"), { err: "Evidence not found" });
-      const validity = validityFrom(fd, source.checkedDate, caseId);
+      const validity = validityFrom(fd, source.checkedDate, caseId, source.sourceName);
       await db.update(evidence).set(validity).where(eq(evidence.id, id));
       await touchCase(caseId, user.id, `validity for ${source.code}`);
       await audit(user.id, "evidence.validity_updated", { evidenceId: id, ...validity }, caseId);

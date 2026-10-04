@@ -4,6 +4,7 @@ import { SubmitButton } from "@/components/submit-button";
 import type { LoadedCase } from "@/lib/cases";
 import { dateStr, label, todayNairobi } from "@/lib/format";
 import { evidenceState, EVIDENCE_STATE_LABELS } from "@/lib/evidence-policy";
+import { SOURCE_CATALOGUE, validityExceptions } from "@/lib/source-rules";
 import { isEditable } from "@/lib/workflow";
 
 export function EvidenceTab({ c }: { c: LoadedCase }) {
@@ -39,7 +40,12 @@ export function EvidenceTab({ c }: { c: LoadedCase }) {
                       )}
                       {e.locator && <div className="text-xs text-muted">At: {e.locator}</div>}
                     </td>
-                    <td>{label(e.category)}</td>
+                    <td>
+                      {label(e.category)}
+                      {validityExceptions(e).map((x) => (
+                        <div key={x} className="mt-1 text-xs font-medium text-amber-800">Exception: {x}</div>
+                      ))}
+                    </td>
                     <td>{label(e.accessResult)}</td>
                     <td className="min-w-52">
                       <div className="mb-1 whitespace-nowrap">{dateStr(e.checkedDate)}</div>
@@ -83,17 +89,9 @@ export function EvidenceTab({ c }: { c: LoadedCase }) {
           <Field label="Source" name="sourceName" hint="e.g. BRS official search (CR12), KRA TCC checker">
             <input id="sourceName" name="sourceName" className="input" required list="common-sources" />
             <datalist id="common-sources">
-              <option value="BRS official company search (CR12)" />
-              <option value="BRS business name search (CR13)" />
-              <option value="KRA iTax PIN checker" />
-              <option value="KRA iTax TCC checker" />
-              <option value="KRA eTIMS invoice checker" />
-              <option value="KENIC .ke WHOIS" />
-              <option value="County business permit" />
-              <option value="PPIP public procurement awards" />
-              <option value="Independent call to registered contact" />
-              <option value="Client-supplied invoice" />
-              <option value="Client-supplied bank letter" />
+              {SOURCE_CATALOGUE.map((x) => (
+                <option key={x.name} value={x.name} />
+              ))}
             </datalist>
           </Field>
           <Field label="Issuing authority" name="authority">
@@ -120,9 +118,9 @@ export function EvidenceTab({ c }: { c: LoadedCase }) {
           <Field label="Date checked" name="checkedDate">
             <input id="checkedDate" name="checkedDate" type="date" className="input" defaultValue={todayNairobi()} />
           </Field>
-          <Field label="Source expiry (if specified)" name="validUntil" hint="Use the date on the actual source; do not invent an expiry."><input id="validUntil" name="validUntil" type="date" className="input" /></Field>
-          <Field label="Recheck on" name="recheckOn" hint="Choose a justified date for this transaction or your approved source policy."><input id="recheckOn" name="recheckOn" type="date" className="input" /></Field>
-          <Field label="Validity basis" name="validityNote" hint="Record the source's expiry wording or the reason for your recheck date."><input id="validityNote" name="validityNote" className="input" /></Field>
+          <Field label="Source expiry (if specified)" name="validUntil" hint="Only if the source states one, e.g. a TCC or permit expiry. Never invent one."><input id="validUntil" name="validUntil" type="date" className="input" /></Field>
+          <Field label="Recheck on" name="recheckOn" hint="Leave blank for sources in the list: the standard date is filled in. A later date is shown to the reviewer as an exception."><input id="recheckOn" name="recheckOn" type="date" className="input" /></Field>
+          <Field label="Validity basis" name="validityNote" hint="Needed only for sources not in the list, or when you depart from the standard date."><input id="validityNote" name="validityNote" className="input" /></Field>
           <Field label="Confidence" name="confidence">
             <select id="confidence" name="confidence" className="input" defaultValue="MEDIUM">
               <option value="HIGH">High</option>

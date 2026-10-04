@@ -35,6 +35,8 @@ These come straight from the operating manual in the Trust Pack:
 - The analyst can't review or release their own case, and nor can anyone else who edited it.
 - A "Verified" finding must cite at least one source that was actually examined; a source marked access required, failed or not supplied can't support it.
 - Verified and partially verified findings must retain at least one cited source that is current under a recorded validity policy. Review and release evaluate the date again, including when evidence lapses after approval. Changing validity cancels an earlier review.
+- A positive finding needs the kind of source its check requires: an official register for legal identity and tax, an independent confirmation for representative authority and bank details, client documents plus an official record for document consistency, and something other than the supplier itself for digital identity and operations. Sources labelled "Unverified" never count.
+- Common sources (BRS, KRA, eTIMS, permits, PPIP, KENIC, independent calls, client documents) get a standard recheck date automatically; departures are listed for the reviewer.
 - "Material red flags" can only be chosen when an established contradiction or a conflicting critical finding supports it.
 - Any change that affects a case after review cancels the review: bank details logged, confirmed, rejected, revoked or superseded, or shared supplier details edited from another case.
 - Release re-checks every content rule, not just the review.

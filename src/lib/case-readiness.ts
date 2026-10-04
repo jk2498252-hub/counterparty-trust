@@ -1,5 +1,5 @@
 import type { LoadedCase } from "./cases";
-import { eligibleEvidenceIds, evidenceDecisionFindings } from "./evidence-policy";
+import { eligibleEvidenceIds, evidenceDecisionFindings, findingSupportGaps } from "./evidence-policy";
 import { todayNairobi } from "./format";
 import { LAYER_DEFINITIONS } from "./layers";
 import { suggestOutcome, type FindingStatus } from "./outcome";
@@ -15,6 +15,7 @@ export function buildSubmitInput(c: ReadinessCase, today = todayNairobi()): Subm
       layer: LAYER_DEFINITIONS[f.layer].title, status: f.status, critical: f.critical, finding: f.finding,
       evidenceCount: f.evidenceIds.length, examinedEvidenceCount: f.evidenceIds.filter(id => examined.has(id)).length,
       usableEvidenceCount: f.evidenceIds.filter(id => usable.has(id)).length,
+      sourceGaps: findingSupportGaps(f, c.evidence, today),
     })),
     discrepancies: c.discrepancies, outcome: c.outcome, outcomeSummary: c.outcomeSummary,
     commissioningAuthorityConfirmed: c.commissioningAuthorityConfirmed, analystId: c.analystId,

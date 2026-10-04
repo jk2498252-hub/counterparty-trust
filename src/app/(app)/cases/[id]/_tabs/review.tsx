@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { validityExceptions } from "@/lib/source-rules";
 import { releaseAction, reviewAction } from "@/app/actions/cases";
 import { Badge, Empty } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -41,6 +42,17 @@ export function ReviewTab({ c, user }: { c: LoadedCase; user: SessionUser }) {
               Read the <Link href={`/cases/${c.id}/report`} className="underline">report preview</Link> and the evidence before ticking.
               Ask: could the client mistake this for payment approval? Could a missing record become an accusation?
             </p>
+            {(() => {
+              const exceptions = c.evidence.flatMap((e) =>
+                c.findings.some((f) => f.evidenceIds.includes(e.id)) ? validityExceptions(e).map((x) => `${e.code} ${e.sourceName}: ${x}`) : [],
+              );
+              return exceptions.length ? (
+                <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <div className="mb-1 font-semibold">Source policy exceptions to check before passing</div>
+                  <ul className="list-disc pl-5">{exceptions.map((x) => <li key={x}>{x}</li>)}</ul>
+                </div>
+              ) : null;
+            })()}
             <form action={reviewAction} className="space-y-4">
               <input type="hidden" name="caseId" value={c.id} />
               <input type="hidden" name="caseVersion" value={c.version} />

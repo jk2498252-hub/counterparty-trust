@@ -1,6 +1,6 @@
 import type { LoadedCase } from "./cases";
 import { caseReadinessBlockers, caseSuggestion } from "./case-readiness";
-import { EVIDENCE_STATE_LABELS, evidenceState, eligibleEvidenceIds } from "./evidence-policy";
+import { EVIDENCE_STATE_LABELS, evidenceState, eligibleEvidenceIds, findingSupportGaps } from "./evidence-policy";
 import { todayNairobi } from "./format";
 import { LAYER_DEFINITIONS, OUTCOME_LABELS } from "./layers";
 
@@ -34,7 +34,9 @@ export function analyseCase(c: AssistedCase, today = todayNairobi()) {
       if (f.status === "NOT_STARTED") add(`finding-${f.id}`, "action", `Assess ${title.toLowerCase()}`, LAYER_DEFINITIONS[f.layer].question, `checks#${f.layer}`);
       else if (!f.finding?.trim() || !f.evidenceIds.length) add(`finding-${f.id}`, "action", `Complete ${title.toLowerCase()}`, "Record the finding and cite the sources or documented access gaps it uses.", `checks#${f.layer}`);
       else if ((f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && !f.evidenceIds.some(id => usable.has(id)))
-        add(`finding-${f.id}`, "urgent", `Refresh support for ${title.toLowerCase()}`, "The recorded positive assessment has no current source under a recorded validity policy.", `checks#${f.layer}`);
+        add(`finding-${f.id}`, "urgent", `Refresh support for ${title.toLowerCase()}`, "The recorded positive assessment has no current source that can support it.", `checks#${f.layer}`);
+      else if ((f.status === "VERIFIED" || f.status === "PARTIALLY_VERIFIED") && findingSupportGaps(f, c.evidence, today).length)
+        add(`finding-${f.id}`, "urgent", `Stronger source needed for ${title.toLowerCase()}`, `A positive finding here needs ${findingSupportGaps(f, c.evidence, today).join(", and ")}.`, `checks#${f.layer}`);
     }
     for (const issue of c.discrepancies.filter(d => !["EXPLAINED", "RESOLVED"].includes(d.state))) {
       add(`issue-${issue.id}`, issue.severity === "CRITICAL" || issue.severity === "MATERIAL" ? "urgent" : "action",

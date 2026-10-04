@@ -26,6 +26,10 @@ jobs:
   windows:
     if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: windows-latest
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,28 +106,57 @@ jobs:
             desktop/dist/*.exe
             desktop/dist/*.blockmap
             desktop/dist/latest.yml
-      - name: Prepare release notes
-        if: steps.version.outputs.publish == 'true'
-        shell: pwsh
-        run: |
-          $source = 'docs/releases/${{ steps.version.outputs.tag }}.md'
-          if (!(Test-Path $source)) { throw "Add release notes at $source before publishing." }
-          Copy-Item $source release-notes.md
-      - if: steps.version.outputs.publish == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Counterparty Trust ${{ steps.version.outputs.tag }}
-          target_commitish: ${{ steps.version.outputs.sha }}
-          make_latest: true
-          files: |
-            desktop/dist/*.exe
-            desktop/dist/*.blockmap
-            desktop/dist/latest.yml
-          body_path: release-notes.md
-          fail_on_unmatched_files: true
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: desktop-diagnostics
           path: e2e/screens
+
+  # Publishing reaches every installed app, so it waits for the owner's approval
+  # on the "release" environment (Settings -> Environments -> release -> Required reviewers).
+  publish:
+    needs: windows
+    if: needs.windows.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Refuse to publish unless releases require approval
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let env;
+            try {
+              env = await github.rest.repos.getEnvironment({ ...context.repo, environment_name: 'release' });
+            } catch (error) {
+              core.setFailed(`Could not read the release environment (${error.status}). Nothing was published.`);
+              return;
+            }
+            const gated = (env.data.protection_rules || []).some(rule => rule.type === 'required_reviewers' && (rule.reviewers || []).length > 0);
+            if (!gated) core.setFailed('The "release" environment has no required reviewer. Add one under Settings -> Environments -> release. Nothing was published.');
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.windows.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: Counterparty-Trust-Setup
+          path: dist
+      - name: Prepare release notes
+        run: |
+          source="docs/releases/${{ needs.windows.outputs.tag }}.md"
+          test -f "$source" || { echo "Add release notes at $source before publishing."; exit 1; }
+          cp "$source" release-notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.windows.outputs.tag }}
+          name: Counterparty Trust ${{ needs.windows.outputs.tag }}
+          target_commitish: ${{ needs.windows.outputs.sha }}
+          make_latest: true
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+          body_path: release-notes.md
+          fail_on_unmatched_files: true

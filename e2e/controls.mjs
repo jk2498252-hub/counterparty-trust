@@ -91,9 +91,15 @@ await press('button:has-text("Save intake")');
 await page.goto(c2);
 await press(statusForm("INTAKE_COMPLETE"));
 await press(statusForm("IN_PROGRESS"));
-for (const [src, access] of [["BRS official company search (CR12)", "EXAMINED"], ["KRA iTax TCC checker", "ACCESS_REQUIRED"]]) {
+for (const [src, access, category] of [
+  ["BRS official company search (CR12)", "EXAMINED", "AUTHORITATIVE"],
+  ["KRA iTax TCC checker", "ACCESS_REQUIRED", "AUTHORITATIVE"],
+  ["Independent call to registered contact", "EXAMINED", "INDEPENDENT_CONFIRMATION"],
+  ["Client-supplied invoice", "EXAMINED", "CLIENT_SUPPLIED"],
+]) {
   await page.goto(`${c2}?tab=evidence`);
   await page.fill("#sourceName", src);
+  await page.selectOption("#category", category);
   await page.fill("#recheckOn", new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10));
   await page.fill("#validityNote", "Fictional CI source policy for this test transaction.");
   await page.selectOption("#accessResult", access);
@@ -128,8 +134,15 @@ log("Bank details confirmed by two other people");
 
 // B. A source that was not examined cannot support "Verified" (fix 4)
 await login("analyst");
-for (const layer of ["TAX_COMPLIANCE", "DIGITAL_IDENTITY", "REPRESENTATIVE_AUTHORITY", "OPERATIONAL_EXISTENCE", "DOCUMENT_CONSISTENCY", "TRANSACTION_BENEFICIARY"])
-  await setCheck(c2, layer, "VERIFIED", ["E01"]);
+for (const layer of ["TAX_COMPLIANCE", "DIGITAL_IDENTITY", "OPERATIONAL_EXISTENCE"]) await setCheck(c2, layer, "VERIFIED", ["E01"]);
+await setCheck(c2, "REPRESENTATIVE_AUTHORITY", "VERIFIED", ["E03"]);
+await setCheck(c2, "DOCUMENT_CONSISTENCY", "VERIFIED", ["E01", "E04"]);
+// An official register alone cannot confirm bank details: the screen says what's missing.
+await setCheck(c2, "TRANSACTION_BENEFICIARY", "VERIFIED", ["E01"]);
+await page.goto(`${c2}?tab=checks`);
+if (!(await page.locator("section#TRANSACTION_BENEFICIARY").innerText()).includes("Still missing: an independent confirmation")) fail("Missing source type should be shown");
+log("A registry search alone cannot verify bank details; the missing source type is shown");
+await setCheck(c2, "TRANSACTION_BENEFICIARY", "VERIFIED", ["E03"]);
 await setCheck(c2, "LEGAL_IDENTITY", "VERIFIED", ["E02"]);
 await page.goto(`${c2}?tab=outcome`);
 const positive = page.locator('input[value="VERIFIED_WITHIN_SCOPE"]');
