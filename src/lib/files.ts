@@ -1,4 +1,5 @@
 // Upload safety: only known document types, checked by their actual bytes, not just the file name.
+import { unzipSync } from "fflate";
 
 export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
@@ -11,13 +12,41 @@ interface Allowed {
 const startsWith = (b: Buffer, bytes: number[]) => bytes.every((v, i) => b[i] === v);
 
 function looksLikeText(b: Buffer): boolean {
-  const sample = b.subarray(0, Math.min(b.length, 4096));
-  for (const byte of sample) {
+  for (const byte of b) {
     if (byte === 0) return false; // binary
   }
   try {
-    new TextDecoder("utf-8", { fatal: true }).decode(sample.length < b.length ? sample.subarray(0, sample.length - 4) : sample);
+    new TextDecoder("utf-8", { fatal: true }).decode(b);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+function isOfficeDocument(b: Buffer, kind: "word" | "xl"): boolean {
+  if (!startsWith(b, [0x50, 0x4b, 0x03, 0x04])) return false;
+  const main = kind === "word" ? "word/document.xml" : "xl/workbook.xml";
+  let entries = 0;
+  let expanded = 0;
+  try {
+    const files = unzipSync(b, { filter: (file) => {
+      entries++;
+      expanded += file.originalSize;
+      if (entries > 2000 || expanded > 64 * 1024 * 1024 || file.originalSize > 16 * 1024 * 1024 ||
+          file.name.includes("..") || file.name.startsWith("/") || /(?:vbaProject|\/embeddings\/|\.(?:exe|com|scr|js|vbs|ps1)$)/i.test(file.name)) throw new Error("Unsafe Office archive");
+      if (file.name === "[Content_Types].xml" || file.name === main) {
+        if (file.originalSize > 2 * 1024 * 1024) throw new Error("Office XML is too large");
+        return true;
+      }
+      return false;
+    } });
+    if (!files["[Content_Types].xml"] || !files[main]) return false;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const types = decoder.decode(files["[Content_Types].xml"]);
+    const document = decoder.decode(files[main]);
+    const contentType = kind === "word" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
+    return types.includes(`PartName="/${main}"`) && types.includes(contentType) &&
+      (kind === "word" ? /<(?:\w+:)?document\b/.test(document) : /<(?:\w+:)?workbook\b/.test(document));
   } catch {
     return false;
   }
@@ -30,12 +59,12 @@ const ALLOWED: Allowed[] = [
   {
     ext: ["docx"],
     mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    check: (b) => startsWith(b, [0x50, 0x4b, 0x03, 0x04]),
+    check: (b) => isOfficeDocument(b, "word"),
   },
   {
     ext: ["xlsx"],
     mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    check: (b) => startsWith(b, [0x50, 0x4b, 0x03, 0x04]),
+    check: (b) => isOfficeDocument(b, "xl"),
   },
   { ext: ["csv"], mime: "text/csv", check: looksLikeText },
   { ext: ["txt"], mime: "text/plain", check: looksLikeText },

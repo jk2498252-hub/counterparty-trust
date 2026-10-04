@@ -2,13 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { cases, clients, counterparties, paymentInstructions } from "@/db/schema";
+import { cases, clients, counterparties, paymentInstructions, reports } from "@/db/schema";
 import { Empty, OutcomeBadge, PageHeader, PaymentBadge, StatusBadge } from "@/components/ui";
 import { dateStr } from "@/lib/format";
 import { isUuid } from "@/lib/nav";
 import { requireUser } from "@/lib/session";
-
-const FRESH_DAYS = 30;
+import { evidenceDateRange } from "@/lib/freshness";
+import { reportMatches } from "@/lib/integrity";
+import type { ReportData } from "@/lib/report";
 
 export default async function SupplierPage({ params }: { params: Promise<{ id: string }> }) {
   await requireUser();
@@ -16,12 +17,15 @@ export default async function SupplierPage({ params }: { params: Promise<{ id: s
   if (!isUuid(id)) notFound();
   const [cp] = await db.select().from(counterparties).where(eq(counterparties.id, id));
   if (!cp) notFound();
-  const [caseRows, payRows] = await Promise.all([
+  const [caseRows, payRows, reportRows] = await Promise.all([
     db.select({ c: cases, client: clients.name }).from(cases).innerJoin(clients, eq(cases.clientId, clients.id)).where(eq(cases.counterpartyId, id)).orderBy(desc(cases.createdAt)),
     db.select().from(paymentInstructions).where(eq(paymentInstructions.counterpartyId, id)).orderBy(desc(paymentInstructions.createdAt)),
+    db.select({ report: reports }).from(reports).innerJoin(cases, eq(reports.caseId, cases.id)).where(eq(cases.counterpartyId, id)).orderBy(desc(reports.createdAt)).limit(1),
   ]);
-  const lastReleased = caseRows.find(({ c }) => c.releasedAt)?.c;
-  const ageDays = lastReleased?.releasedAt ? Math.floor((Date.now() - lastReleased.releasedAt.getTime()) / 86_400_000) : null;
+  const lastReport = reportRows[0]?.report;
+  const validReport = !!lastReport && reportMatches(lastReport);
+  const snapshot = validReport ? lastReport.snapshot as ReportData : null;
+  const dates = snapshot ? evidenceDateRange(snapshot.evidence) : null;
 
   return (
     <>
@@ -37,10 +41,13 @@ export default async function SupplierPage({ params }: { params: Promise<{ id: s
         }
       />
 
-      <div className={`mb-6 rounded-md border px-4 py-3 text-sm ${ageDays === null ? "border-line bg-white" : ageDays > FRESH_DAYS ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>
-        {ageDays === null && "No released report for this supplier yet."}
-        {ageDays !== null && ageDays <= FRESH_DAYS && <>Last report released {ageDays} day(s) ago. Registry and tax results may be reused for a new transaction only if nothing has changed; new representatives, documents or bank details always need fresh checks.</>}
-        {ageDays !== null && ageDays > FRESH_DAYS && <>Last report is {ageDays} days old. Run fresh registry and KRA checks before relying on it for a new transaction.</>}
+      <div className="mb-6 rounded-md border border-line bg-white px-4 py-3 text-sm">
+        {!lastReport && "No released report for this supplier yet."}
+        {lastReport && !validReport && "The latest released report failed its integrity check. Ask an administrator to restore it."}
+        {snapshot && <>
+          <p>Latest report issued {dateStr(lastReport!.createdAt)}: <OutcomeBadge outcome={snapshot.outcome} /> <Link href={`/cases/${lastReport!.caseId}/report?r=${lastReport!.id}`} className="underline">View released report</Link></p>
+          <p className="mt-2">{dates ? <>Underlying examined sources checked {dateStr(dates.oldest)}{dates.newest !== dates.oldest && <> to {dateStr(dates.newest)}</>}.</> : "No examined source dates recorded."} A recent issue date does not make those checks current. Confirm source validity and changes before using findings for a new transaction; representatives, documents and bank details need transaction-specific checks.</p>
+        </>}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">

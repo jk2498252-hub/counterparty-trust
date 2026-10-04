@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users, type User } from "@/db/schema";
+import { afterCommit } from "./transaction";
 
 const SESSION_COOKIE = "kct_session";
 const PENDING_COOKIE = "kct_mfa_pending";
@@ -50,16 +51,20 @@ async function verify(token: string | undefined) {
 
 export async function startSession(user: User, mfaPassed: boolean) {
   const jar = await cookies();
-  jar.delete(PENDING_COOKIE);
-  jar.set(SESSION_COOKIE, await sign({ sub: user.id, sv: user.sessionVersion, mfa: mfaPassed, kind: "session" }, SESSION_HOURS * 3600), {
-    ...cookieBase,
-    maxAge: SESSION_HOURS * 3600,
+  const token = await sign({ sub: user.id, sv: user.sessionVersion, mfa: mfaPassed, kind: "session" }, SESSION_HOURS * 3600);
+  afterCommit(() => {
+    jar.delete(PENDING_COOKIE);
+    jar.set(SESSION_COOKIE, token, { ...cookieBase, maxAge: SESSION_HOURS * 3600 });
   });
 }
 
 export async function startPendingMfa(user: User) {
   const jar = await cookies();
-  jar.set(PENDING_COOKIE, await sign({ sub: user.id, sv: user.sessionVersion, kind: "pending" }, 300), { ...cookieBase, maxAge: 300 });
+  const token = await sign({ sub: user.id, sv: user.sessionVersion, kind: "pending" }, 300);
+  afterCommit(() => {
+    jar.delete(SESSION_COOKIE);
+    jar.set(PENDING_COOKIE, token, { ...cookieBase, maxAge: 300 });
+  });
 }
 
 export async function getPendingMfaUser(): Promise<User | null> {
@@ -73,8 +78,10 @@ export async function getPendingMfaUser(): Promise<User | null> {
 
 export async function endSession() {
   const jar = await cookies();
-  jar.delete(SESSION_COOKIE);
-  jar.delete(PENDING_COOKIE);
+  afterCommit(() => {
+    jar.delete(SESSION_COOKIE);
+    jar.delete(PENDING_COOKIE);
+  });
 }
 
 export interface SessionUser extends User {
@@ -97,7 +104,10 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 export async function requireUser(opts: { roles?: Role[]; allowMfaSetup?: boolean } = {}): Promise<SessionUser> {
   const u = await getSessionUser();
   if (!u) redirect("/login");
-  if (mfaRequired() && !u.mfaPassed && !opts.allowMfaSetup) redirect("/security");
+  // An already enrolled account must prove its existing factor, even on the
+  // setup page. The setup exception only applies to accounts without a factor.
+  if (u.totpEnabled && !u.mfaPassed) redirect("/login");
+  if (!opts.allowMfaSetup && (u.mustChangePassword || (mfaRequired() && !u.mfaPassed))) redirect("/security");
   if (opts.roles && !opts.roles.includes(u.role)) redirect("/?denied=1");
   return u;
 }

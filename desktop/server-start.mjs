@@ -45,10 +45,12 @@ process.chdir(here);
 createRequire(import.meta.url)("./server.js");
 
 async function shutdown() {
+  globalThis.__kctClosing = true;
   try {
     await globalThis.__kctPglite?.close();
   } catch (e) {
     console.error("[server] close failed", e);
+    process.exit(1);
   }
   process.exit(0);
 }

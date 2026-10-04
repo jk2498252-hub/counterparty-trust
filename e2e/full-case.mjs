@@ -250,7 +250,8 @@ log("Reviewer passed and released the report");
 
 await page.goto(`${caseUrl}/report`);
 const reportHtml = await page.content();
-if (!/Report fingerprint \(SHA-256\)/.test(reportHtml) || reportHtml.includes("DRAFT PREVIEW")) fail("Released report should be fingerprinted and not a draft");
+const fingerprint = (await page.locator("article footer .font-mono").textContent())?.trim() ?? "";
+if (!/Snapshot fingerprint \(SHA-256\)/.test(reportHtml) || !/^[a-f0-9]{64}$/.test(fingerprint) || reportHtml.includes("DRAFT PREVIEW")) fail("Released report should contain a stored-data SHA-256 fingerprint and not be a draft");
 await shot("03-report-released");
 log("Released report is frozen with a SHA-256 fingerprint");
 

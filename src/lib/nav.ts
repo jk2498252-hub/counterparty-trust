@@ -13,6 +13,12 @@ export function str(fd: FormData, key: string): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+/** Passwords preserve spaces; text fields continue to use str(). */
+export function passwordStr(fd: FormData, key: string): string {
+  const v = fd.get(key);
+  return typeof v === "string" ? v : "";
+}
+
 export function optStr(fd: FormData, key: string): string | null {
   const v = str(fd, key);
   return v === "" ? null : v;

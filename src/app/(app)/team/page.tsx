@@ -42,6 +42,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                   <form action={updateUserAction} className="inline">
                     <input type="hidden" name="id" value={u.id} />
                     <input type="hidden" name="op" value="reset" />
+                    <input type="password" name="password" className="input mb-2" placeholder="Reset password (12+ characters)" aria-label={`Reset password for ${u.name}`} autoComplete="new-password" minLength={12} required />
                     <SubmitButton className="text-xs underline" confirm={`Reset password and two-factor for ${u.name}?`}>Reset login</SubmitButton>
                   </form>
                   {u.id !== me.id && (
@@ -59,7 +60,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
       </section>
       <section className="card">
         <h2 className="mb-4 font-semibold">Add a person</h2>
-        <form action={createUserAction} className="grid items-end gap-3 md:grid-cols-4">
+        <form action={createUserAction} className="grid items-end gap-3 md:grid-cols-5">
           <div><label className="label">Name</label><input name="name" className="input" required /></div>
           <div><label className="label">Email</label><input name="email" type="email" className="input" required /></div>
           <div>
@@ -70,9 +71,10 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
               <option value="ADMIN">Admin</option>
             </select>
           </div>
+          <div><label className="label">Initial password</label><input name="password" type="password" className="input" autoComplete="new-password" minLength={12} required /></div>
           <div><SubmitButton>Create account</SubmitButton></div>
         </form>
-        <p className="mt-3 text-xs text-muted">A temporary password is shown once. They will be asked to set up two-factor login when they first sign in.</p>
+        <p className="mt-3 text-xs text-muted">Choose an initial password and share it privately. They must change it and set up two-factor login before opening case files.</p>
       </section>
     </>
   );

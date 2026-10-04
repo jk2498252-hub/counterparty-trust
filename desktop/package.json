@@ -1,7 +1,7 @@
 {
   "name": "counterparty-trust-desktop",
   "productName": "Counterparty Trust",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Pre-transaction supplier verification workbench (Kenya)",
   "author": "KELIM",
   "private": true,
@@ -20,6 +20,11 @@
     },
     "files": [
       "main.js",
+      "lifecycle.js",
+      "backup.js",
+      "backup-preload.js",
+      "backup-password.html",
+      "backup-password.js",
       "loading.html",
       "assets/**"
     ],

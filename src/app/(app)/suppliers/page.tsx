@@ -24,7 +24,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
     .limit(300);
   return (
     <>
-      <PageHeader title="Suppliers" subtitle="Verified once, reused with care: every profile shows how fresh its evidence is." />
+      <PageHeader title="Suppliers" subtitle="Each profile separates report issue dates from the dates its sources were checked." />
       <form className="mb-4 flex gap-2">
         <input name="q" defaultValue={q ?? ""} className="input max-w-sm" placeholder="Name, KRA PIN or registration number" />
         <button className="btn-secondary">Search</button>

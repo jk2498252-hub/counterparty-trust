@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
-  const locked = mfaRequired() && !user.mfaPassed;
+  const locked = user.mustChangePassword || ((mfaRequired() || user.totpEnabled) && !user.mfaPassed);
   const nav = [
     { href: "/", label: "Dashboard" },
     { href: "/cases", label: "Cases" },

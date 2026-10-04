@@ -1,9 +1,14 @@
 name: Desktop app (Windows)
 on:
+  # Main is eligible for an automatic release only after its complete CI passes.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       release:
-        description: "Publish as a GitHub release with this tag (e.g. v0.1.0). Leave empty to only build."
+        description: "Release tag matching desktop/package.json (e.g. v0.2.1). Leave empty to only build."
         required: false
         default: ""
   push:
@@ -11,41 +16,114 @@ on:
 
 permissions:
   contents: write
+  actions: read
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
 
 jobs:
   windows:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm ci
+      - name: Select a new, matching version
+        id: version
+        uses: actions/github-script@v7
+        env:
+          REQUESTED_RELEASE: ${{ inputs.release }}
+        with:
+          script: |
+            const fs = require('fs');
+            const version = JSON.parse(fs.readFileSync('desktop/package.json')).version;
+            const rootVersion = JSON.parse(fs.readFileSync('package.json')).version;
+            if (!/^\d+\.\d+\.\d+$/.test(version) || version !== rootVersion) throw new Error('Root and desktop versions must match.');
+            const tag = `v${version}`;
+            let publish = context.eventName === 'workflow_run' || context.ref.startsWith('refs/tags/') || !!process.env.REQUESTED_RELEASE;
+            const requested = process.env.REQUESTED_RELEASE || (context.ref.startsWith('refs/tags/') ? context.ref.slice(10) : tag);
+            if (publish && requested !== tag) throw new Error(`Release tag must be ${tag}`);
+            if (publish && context.eventName !== 'workflow_run') {
+              const branch = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+              if (branch.data.commit.sha !== context.sha) throw new Error('Publish only the current main commit.');
+              const runs = await github.rest.actions.listWorkflowRuns({ ...context.repo, workflow_id: 'ci.yml', head_sha: context.sha, status: 'success', per_page: 20 });
+              if (!runs.data.workflow_runs.some(run => run.event === 'push' && run.head_branch === 'main')) throw new Error('Wait for main CI to pass before publishing.');
+            }
+            let build = true;
+            if (context.eventName === 'workflow_run') {
+              const branch = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+              if (branch.data.commit.sha !== context.payload.workflow_run.head_sha) build = false;
+            }
+            if (publish) {
+              try {
+                await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+                build = false; // Never overwrite a published installer or its update manifest.
+              } catch (error) { if (error.status !== 404) throw error; }
+            }
+            core.setOutput('build', String(build));
+            core.setOutput('publish', String(publish && build));
+            core.setOutput('tag', tag);
+            core.setOutput('sha', context.payload.workflow_run?.head_sha || context.sha);
+      - if: steps.version.outputs.build == 'true'
+        run: npm ci
+      - if: steps.version.outputs.build == 'true'
+        run: npm run typecheck
+      - if: steps.version.outputs.build == 'true'
+        run: npm test
+      - if: steps.version.outputs.build == 'true'
+        run: npm run test:desktop
+      - if: steps.version.outputs.build == 'true'
+        run: npm ci
         working-directory: desktop
-      - run: npm run dist:win
+      - if: steps.version.outputs.build == 'true'
+        run: npm run dist:win
         working-directory: desktop
-      - uses: actions/upload-artifact@v4
+      - name: Smoke-test the packaged Windows app
+        if: steps.version.outputs.build == 'true'
+        shell: pwsh
+        run: |
+          $env:DESKTOP_EXE = (Resolve-Path 'desktop/dist/win-unpacked/Counterparty Trust.exe').Path
+          node e2e/desktop-app.mjs
+      - name: Verify updater assets match the installer
+        if: steps.version.outputs.build == 'true'
+        shell: pwsh
+        run: node scripts/check-update.mjs desktop/dist
+      - if: steps.version.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
         with:
           name: Counterparty-Trust-Setup
           path: |
             desktop/dist/*.exe
             desktop/dist/*.blockmap
             desktop/dist/latest.yml
-      # On a version tag, or when a release tag is given, publish a release with the installer as a download.
-      - if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+      - name: Prepare release notes
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $source = 'docs/releases/${{ steps.version.outputs.tag }}.md'
+          if (!(Test-Path $source)) { throw "Add release notes at $source before publishing." }
+          Copy-Item $source release-notes.md
+      - if: steps.version.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release || github.ref_name }}
-          name: Counterparty Trust ${{ inputs.release || github.ref_name }}
-          target_commitish: ${{ github.sha }}
-          # latest.yml and the blockmap let installed apps find and download this update.
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Counterparty Trust ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ steps.version.outputs.sha }}
+          make_latest: true
           files: |
             desktop/dist/*.exe
             desktop/dist/*.blockmap
             desktop/dist/latest.yml
-          body: |
-            Windows installer for the Counterparty Trust workbench.
-            Download **Counterparty-Trust-Setup-*.exe**, run it, then open Counterparty Trust from the Start menu.
-            Windows may show "Windows protected your PC" because the installer is not signed yet: click More info → Run anyway.
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-diagnostics
+          path: e2e/screens

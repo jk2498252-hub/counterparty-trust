@@ -3,12 +3,14 @@ import { createFirstAdminAction } from "@/app/actions/auth";
 import { AuthShell } from "@/components/auth-shell";
 import { Flash } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
-import { hasAnyUser } from "@/lib/setup";
+import { firstRunMode, hasAnyUser } from "@/lib/setup";
 
 export const dynamic = "force-dynamic";
 
 export default async function SetupPage({ searchParams }: { searchParams: Promise<{ err?: string }> }) {
   if (await hasAnyUser()) redirect("/login");
+  const mode = firstRunMode();
+  if (mode === "disabled") redirect("/login");
   const { err } = await searchParams;
   return (
     <AuthShell title="Welcome: create your admin account">
@@ -18,6 +20,10 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
       </p>
       <Flash err={err} />
       <form action={createFirstAdminAction} className="space-y-4">
+        {mode === "token" && <div>
+          <label className="label" htmlFor="setupToken">Server setup token</label>
+          <input className="input" id="setupToken" name="setupToken" type="password" autoComplete="off" required />
+        </div>}
         <div>
           <label className="label" htmlFor="name">Your name</label>
           <input className="input" id="name" name="name" required />

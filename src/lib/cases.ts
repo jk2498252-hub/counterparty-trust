@@ -21,11 +21,12 @@ import {
 import { LAYERS, LAYER_DEFINITIONS } from "./layers";
 import { editInvalidatesReview, isEditable, type CaseStatus, type SubmitInput } from "./workflow";
 import { audit } from "./audit";
+import { todayNairobi } from "./format";
 
 export async function nextReference(): Promise<string> {
-  const year = new Date().getFullYear();
+  const year = todayNairobi().slice(0, 4);
   const [{ n }] = await db
-    .select({ n: sql<number>`count(*)::int` })
+    .select({ n: sql<number>`coalesce(max(split_part(${cases.reference}, '-', 3)::integer), 0)::int` })
     .from(cases)
     .where(sql`${cases.reference} like ${`KC-${year}-%`}`);
   return `KC-${year}-${String(n + 1).padStart(4, "0")}`;

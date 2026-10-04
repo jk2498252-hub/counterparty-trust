@@ -2,7 +2,7 @@
 
 Internal software for running **pre-transaction supplier checks** in Kenya: open a case, record what each official source shows, decide an outcome the evidence supports, have a second person review it, and release a fingerprinted report to the client. It also handles the riskiest moment in supplier payments: **a change of bank details**.
 
-This is version 0.1, built for the pilot phase. It is used by your own team (analysts, reviewers, admins). Clients do not log in yet.
+This is version 0.2.1, built for the internal pilot. It is used by your own team (analysts, reviewers, admins). Clients do not log in yet. The [production checklist](docs/PRODUCTION_READINESS.md) distinguishes repaired controls from work still required before live client use.
 
 ## What it does
 
@@ -16,9 +16,9 @@ This is version 0.1, built for the pilot phase. It is used by your own team (ana
 | **Independent review** | A reviewer who did not produce the case ticks the QC checklist. Any edit after review cancels the approval. |
 | **Released reports** | Frozen with a SHA-256 fingerprint. Released cases are locked; changes need a correction, which creates a new version. |
 | **Bank-detail changes** | Account numbers encrypted. A change starts **frozen**, needs confirmation through an independent channel, then two approvals from people who did not log it. Nothing here moves money. |
-| **Supplier profiles** | Verify once, reuse with care: each supplier shows past cases, outcomes, bank history and how fresh the last report is (30-day rule). |
+| **Supplier profiles** | Shows the latest released snapshot, its outcome and actual source check dates. A new report does not refresh old evidence. |
 | **Pilot economics** | Log time per case. The dashboard shows real hours, cost and margin by service depth, so the pilot shows whether the prices work. |
-| **Security** | Two-factor login (authenticator app) for everyone, account lockout, roles, full audit trail, private document storage. |
+| **Security** | Password and MFA lockouts, expiring MFA setup, session revocation on factor changes, forced replacement of initial passwords, roles and audited workflow transactions. |
 
 ## The rules it enforces
 
@@ -46,7 +46,7 @@ Use the desktop app for a pilot on one computer. When several people on differen
 
 ## Try it on your computer (developer setup)
 
-You need [Node.js 20+](https://nodejs.org) and [PostgreSQL 16](https://www.postgresql.org/download/) (or Docker).
+You need [Node.js 22+](https://nodejs.org) and [PostgreSQL 16](https://www.postgresql.org/download/) (or Docker).
 
 ```bash
 npm install
@@ -80,15 +80,18 @@ Put it behind HTTPS (e.g. Caddy or a cloud load balancer). Back up the `db-data`
 - **Business rules** are pure functions with unit tests: `src/lib/outcome.ts`, `src/lib/workflow.ts`, `src/lib/payments.ts`, `src/lib/files.ts`, `src/lib/crypto.ts`.
 - **Checks guidance** lives in `src/lib/layers.ts`; edit it as the SOP evolves.
 - **Database schema:** `src/db/schema.ts`. After changing it, run `npm run db:generate` and commit the new file in `drizzle/`.
-- **Tests:** `npm test` (rules), `npm run test:e2e` (a full case with three people in a real browser; needs the app running and demo users), then `node e2e/controls.mjs` (tries to break the review and evidence controls).
-- **Every server action** calls `requireUser()` and validates its input; every case edit goes through `touchCase()`, which bumps the version and cancels any review.
+- **Tests:** `npm test` (rules, accounts and concurrent transactions; a fresh local database unless running in CI), `npm run test:desktop` (shutdown, encrypted backup, legacy migration, restore and administrator recovery). Browser walkthrough: `npm run test:e2e`, `node e2e/controls.mjs`, then `node e2e/security.mjs` with the app running and demo users.
+- **Workflow transactions:** Every mutation runs through `runWorkflow()`. A database row lock serialises writes across processes, including permission checks, review invalidation and audits. Successful redirects commit; validation failures roll back. Authentication failures retain their attempt counters. This deliberately prioritises correctness for a single-organisation pilot over high write throughput.
+- **Desktop releases:** Bump root and desktop versions, add `docs/releases/v<version>.md` and push to main. Successful main CI starts the tested Windows build and publishes the installer, blockmap and update manifest. See [desktop/README.md](desktop/README.md).
+- **Lost sole-admin authenticator:** An operator with server/data-folder access can use `npm run user:recover -- --email admin@example.com`. See [recovery instructions](docs/RECOVERY.md). This is an audited offline procedure.
 
-## Known limits of v0.1 (next steps)
+## Known limits of v0.2.1
 
 - Uploaded files are type-checked but **not virus-scanned**. Add a scanner (e.g. ClamAV) before accepting files from clients directly.
 - Files are stored on local disk. For more than one server, switch `src/lib/storage.ts` to S3-compatible storage.
 - No client portal yet: the team enters intake and sends reports by hand (print or save as PDF).
 - No live data connections yet (BRS, KRA, data vendors like Smile ID or Prembly). Checks are recorded manually, which is deliberate until source rights and costs are confirmed.
-- The Windows installer is not code-signed yet, so Windows shows a SmartScreen warning on first install.
+- The Windows installer is not code-signed yet. Signed distribution and update verification remain production work.
+- Desktop backups are password-encrypted; the live database, uploads and local key file still require protection of the computer and storage volume. Scheduled server backups and recovery objectives must be configured for the actual deployment.
 - Single organisation. Multi-tenant separation is needed before offering it to other firms.
 - Legal readiness (PSRA, ODPC registration, lawful basis, retention periods) is outside the software and must be settled with Kenyan counsel before live cases.
