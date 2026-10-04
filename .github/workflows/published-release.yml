@@ -1,0 +1,51 @@
+name: Published Windows release checks
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/published-release.yml
+      - e2e/published-release.mjs
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/published-release.yml
+      - e2e/published-release.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  published-v030:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Download and install the published v0.3.0 executable
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'Counterparty-Trust-Setup-0.3.0.exe'
+          Invoke-WebRequest 'https://github.com/jk2498252-hub/counterparty-trust/releases/download/v0.3.0/Counterparty-Trust-Setup-0.3.0.exe' -OutFile $installer
+          $expected = '0177a3ae65c3b07538dffca8fbf3904813b4f4e48dcc2cb87f1a6b4c35cb2738'
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Published installer digest changed.' }
+          $destination = Join-Path $env:RUNNER_TEMP 'counterparty-installed-v030'
+          $process = Start-Process $installer -ArgumentList @('/S', "/D=$destination") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          $exe = Join-Path $destination 'Counterparty Trust.exe'
+          if (!(Test-Path $exe)) { throw 'Installed executable was not found.' }
+          "DESKTOP_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Test the installed release with disposable data
+        run: node e2e/published-release.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: published-v030-test-evidence
+          path: |
+            e2e/screens/published-smart-assistant.png
+            e2e/screens/published-dashboard.png
+            e2e/screens/published-result.json
+          if-no-files-found: ignore
