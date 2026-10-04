@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { cases, counterparties, paymentInstructions, timeEntries } from "@/db/schema";
-import { Empty, Flash, OutcomeBadge, PageHeader, PaymentBadge, StatusBadge } from "@/components/ui";
+import { cases, counterparties, paymentInstructions, timeEntries, evidence, findings } from "@/db/schema";
+import { Badge, Empty, Flash, OutcomeBadge, PageHeader, PaymentBadge, StatusBadge } from "@/components/ui";
+import { RefreshAttention } from "@/components/refresh-attention";
+import { attentionQueue } from "@/lib/attention";
 import { economics } from "@/lib/env";
 import { hours, kes } from "@/lib/format";
 import { requireUser } from "@/lib/session";
@@ -31,6 +33,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const waitingReview = allCases.filter(({ c }) => c.status === "AWAITING_HUMAN_QC" || c.status === "READY_TO_RELEASE");
   const mine = open.filter(({ c }) => c.analystId === user.id);
   const done = allCases.filter(({ c }) => c.status === "RELEASED" || c.status === "CLOSED");
+  const attentionCases = (user.role === "ANALYST" ? mine : open).map(({ c }) => c);
+  const attentionIds = attentionCases.map(c => c.id);
+  const [attentionSources, attentionFindings] = attentionIds.length ? await Promise.all([
+    db.select({ id: evidence.id, caseId: evidence.caseId, code: evidence.code, sourceName: evidence.sourceName, checkedDate: evidence.checkedDate, accessResult: evidence.accessResult, validUntil: evidence.validUntil, recheckOn: evidence.recheckOn, validityNote: evidence.validityNote }).from(evidence).where(inArray(evidence.caseId, attentionIds)),
+    db.select({ caseId: findings.caseId, status: findings.status }).from(findings).where(inArray(findings.caseId, attentionIds)),
+  ]) : [[], []];
+  const attention = attentionQueue(attentionCases, attentionSources, attentionFindings);
 
   const byDepth = (["DIGITAL", "ENHANCED", "EXTENDED"] as const).map((depth) => {
     const rows = done.filter(({ c }) => c.depth === depth);
@@ -50,6 +59,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   return (
     <>
+      <RefreshAttention />
       <PageHeader title={`Hello, ${user.name.split(" ")[0]}`} subtitle="What needs attention today" actions={<Link href="/cases/new" className="btn">New case</Link>} />
       <Flash err={sp.denied ? "You don't have access to that page." : undefined} />
 
@@ -68,6 +78,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        <section className="card lg:col-span-2">
+          <h2 className="mb-1 font-semibold">Automatic attention queue</h2><p className="mb-3 text-sm text-muted">Upcoming payment dates, evidence validity and unfinished checks. Refreshes every minute while this page is active.</p>
+          {attention.length ? <><ul className="divide-y divide-line">{attention.slice(0, 15).map(t => <li key={t.id} className="py-2"><div className="flex flex-wrap items-center gap-2"><Badge color={t.priority === "urgent" ? "red" : "amber"}>{t.priority === "urgent" ? "Needs attention" : "Action"}</Badge><Link href={t.href} className="text-sm font-semibold text-brand hover:underline">{t.title}</Link></div><p className="mt-1 text-sm text-muted">{t.reason}</p></li>)}</ul>{attention.length > 15 && <p className="mt-2 text-xs text-muted">Showing 15 of {attention.length} actions. Open each case&apos;s smart assistant for its complete checklist.</p>}</> : <Empty>No attention items found for your active cases.</Empty>}
+        </section>
         <section className="card">
           <h2 className="mb-3 font-semibold">{user.role === "ANALYST" ? "My open cases" : "Waiting for review or release"}</h2>
           {(user.role === "ANALYST" ? mine : waitingReview).length ? (

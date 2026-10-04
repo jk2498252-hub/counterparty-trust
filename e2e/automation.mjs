@@ -1,0 +1,62 @@
+import { chromium } from "playwright";
+import { authenticator } from "otplib";
+import { readFileSync } from "node:fs";
+
+const base = process.env.BASE_URL ?? "http://localhost:3000";
+const shots = process.env.SHOTS_DIR ?? "./e2e/screens";
+const secrets = JSON.parse(readFileSync(`${shots}/mfa-secrets.json`, "utf8"));
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH });
+const page = await browser.newPage({ viewport: { width: 1360, height: 900 } });
+const day = offset => new Date(Date.now() + offset * 86_400_000).toLocaleDateString("en-CA", { timeZone: "Africa/Nairobi" });
+async function press(locator) {
+  const posted = page.waitForResponse(r => r.request().method() === "POST");
+  await locator.click(); await posted; await page.waitForLoadState("networkidle");
+}
+try {
+  await page.goto(`${base}/login`);
+  await page.fill("#email", "analyst@example.test"); await page.fill("#password", "analyst-password-123");
+  await page.click("button[type=submit]"); await page.waitForURL(/\/login\/mfa/);
+  await page.fill("#code", authenticator.generate(secrets.analyst)); await page.click("button[type=submit]"); await page.waitForURL(`${base}/`);
+  await page.goto(`${base}/cases/new`);
+  await page.fill("#kraPin", "P000000000X");
+  await page.getByText("Possible existing supplier", { exact: true }).waitFor();
+  await page.getByRole("button", { name: /^Use / }).first().click();
+  if (await page.locator("#counterpartyId").inputValue() === "new") throw new Error("Matching supplier could not be reused");
+  console.log("✓ Supplier matching suggests and reuses the existing profile");
+  await page.fill("#clientName", "Automation client (fictional)");
+  await page.fill("#decisionPurpose", "Automation regression before a fictional payment");
+  await page.fill("#expectedPaymentDate", day(-1));
+  await page.getByRole("button", { name: "Open case", exact: true }).click();
+  await page.waitForURL(/\/cases\/[0-9a-f-]+\?tab=intake/);
+  const caseUrl = page.url().split("?")[0];
+  await page.goto(`${caseUrl}?tab=evidence`);
+  await page.fill("#sourceName", "Expired fictional source"); await page.fill("#summary", "This fictional record expired yesterday");
+  await page.fill("#validUntil", day(-1)); await page.fill("#validityNote", "Expiry printed on the fictional source");
+  await press(page.getByRole("button", { name: "Log evidence", exact: true }));
+  await page.goto(`${caseUrl}?tab=checks`);
+  const finding = page.locator("#LEGAL_IDENTITY form");
+  await finding.locator('select[name="status"]').selectOption("VERIFIED");
+  await finding.locator('textarea[name="finding"]').fill("Recorded positive assessment for expiry regression");
+  await finding.locator('input[name="evidenceIds"]').first().check();
+  await press(finding.getByRole("button", { name: /Save/ }));
+  await page.goto(`${caseUrl}?tab=assistant`);
+  await page.getByRole("heading", { name: "Smart case assistant" }).waitFor();
+  await page.getByText("E01: expired", { exact: true }).waitFor();
+  await page.getByText("Refresh support for legal identity", { exact: true }).waitFor();
+  if (!(await page.locator("#handover-draft").inputValue()).includes("[E01]")) throw new Error("Handover draft lost its evidence link");
+  await page.screenshot({ path: `${shots}/automation.png`, fullPage: true });
+  console.log("✓ Smart assistant flags expiry and creates an evidence-linked draft");
+  await page.goto(`${caseUrl}?tab=evidence`);
+  const row = page.locator("tr", { has: page.getByText("E01", { exact: true }) });
+  await row.locator("summary").click();
+  await row.locator('input[name="validUntil"]').fill(day(1));
+  await row.locator('input[name="validityNote"]').fill("Corrected transcription of the fictional expiry");
+  await press(row.getByRole("button", { name: "Save validity", exact: true }));
+  await page.goto(`${caseUrl}?tab=assistant`);
+  if (await page.getByText("E01: expired", { exact: true }).count()) throw new Error("Resolved expiry alert remained active");
+  console.log("✓ Recorded validity changes update the assistant");
+  await page.goto(`${base}/`);
+  await page.getByRole("heading", { name: "Automatic attention queue" }).waitFor();
+  await page.getByText(/Payment date approaching or reached/).first().waitFor();
+  console.log("✓ Dashboard automatically surfaces approaching payment dates");
+} finally { await browser.close(); }

@@ -5,12 +5,12 @@ import { SubmitButton } from "@/components/submit-button";
 import type { LoadedCase } from "@/lib/cases";
 import { economics } from "@/lib/env";
 import { dateStr, hours, kes } from "@/lib/format";
-import { LAYER_DEFINITIONS, titled } from "@/lib/layers";
-import { suggestOutcome } from "@/lib/outcome";
+import { LAYER_DEFINITIONS } from "@/lib/layers";
+import { caseSuggestion } from "@/lib/case-readiness";
 import type { SessionUser } from "@/lib/session";
 
 export function OverviewTab({ c, user }: { c: LoadedCase; user: SessionUser }) {
-  const suggestion = suggestOutcome(titled(c.findings), c.discrepancies);
+  const suggestion = caseSuggestion(c);
   const minutes = c.timeEntries.reduce((s, t) => s + t.minutes, 0);
   const cost = (minutes / 60) * economics.hourlyCost + c.directCostsKes;
   const fee = c.feeKes ?? 0;
@@ -21,6 +21,7 @@ export function OverviewTab({ c, user }: { c: LoadedCase; user: SessionUser }) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
+      <section className="card lg:col-span-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Your next steps, explained</h2><p className="mt-1 text-sm text-muted">Automatic checklists, source-validity alerts and a handover draft from this case.</p></div><Link href={`/cases/${c.id}?tab=assistant`} className="btn-secondary">Open smart assistant</Link></div></section>
       <section className="card lg:col-span-2">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-semibold">Checks: {done} of {c.findings.length} assessed</h2>

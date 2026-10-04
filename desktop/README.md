@@ -13,6 +13,7 @@ double-click **Counterparty Trust**, a window opens, and everything runs on that
   repository instead and change `build.publish` in `desktop/package.json`.
 - **First update:** Versions 0.1.x have no updater. Install a current release manually once. Version 0.2.0 and later can receive updates through Help → Check for updates…. An update is installed only after the database has actually closed; a failed or timed-out close postpones installation.
 - **One computer.** The app only listens on `127.0.0.1`. For a team on several computers, use the server version (see the main README).
+- **v0.3.0 source validity.** Existing evidence receives empty policy fields. Before reviewing/releasing an open case with positive findings, record an actual expiry or justified recheck date and its basis for supporting sources. Historical reports stay frozen. Back up before updating.
 
 ## Building the installer
 

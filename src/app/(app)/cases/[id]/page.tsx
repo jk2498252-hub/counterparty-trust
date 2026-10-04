@@ -6,6 +6,8 @@ import { SubmitButton } from "@/components/submit-button";
 import { loadAudit, loadCase } from "@/lib/cases";
 import { isUuid } from "@/lib/nav";
 import { requireUser } from "@/lib/session";
+import { db } from "@/db";
+import { counterparties } from "@/db/schema";
 import type { CaseStatus } from "@/lib/workflow";
 import { OverviewTab } from "./_tabs/overview";
 import { IntakeTab } from "./_tabs/intake";
@@ -18,9 +20,11 @@ import { BankTab } from "./_tabs/bank";
 import { TimeTab } from "./_tabs/time";
 import { ReviewTab } from "./_tabs/review";
 import { HistoryTab } from "./_tabs/history";
+import { AssistantTab } from "./_tabs/assistant";
 
 const TABS = [
   ["overview", "Overview"],
+  ["assistant", "Smart assistant"],
   ["intake", "Intake"],
   ["checks", "Checks"],
   ["evidence", "Evidence"],
@@ -74,6 +78,7 @@ export default async function CasePage({ params, searchParams }: { params: Promi
   if (!c) notFound();
   const tab = TABS.some(([k]) => k === sp.tab) ? sp.tab! : "overview";
   const auditRows = tab === "history" ? await loadAudit(id) : [];
+  const supplierRows = tab === "assistant" ? await db.select().from(counterparties) : [];
 
   return (
     <>
@@ -117,6 +122,7 @@ export default async function CasePage({ params, searchParams }: { params: Promi
         ))}
       </nav>
       {tab === "overview" && <OverviewTab c={c} user={user} />}
+      {tab === "assistant" && <AssistantTab c={c} suppliers={supplierRows} />}
       {tab === "intake" && <IntakeTab c={c} />}
       {tab === "checks" && <ChecksTab c={c} />}
       {tab === "evidence" && <EvidenceTab c={c} />}

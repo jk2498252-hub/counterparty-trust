@@ -4,6 +4,7 @@
 import { LAYER_DEFINITIONS, type Layer } from "./layers";
 import { suggestOutcome, type Outcome } from "./outcome";
 import { PAYMENT_STATUS_LABELS, type PaymentStatus } from "./payments";
+import { evidenceDecisionFindings } from "./evidence-policy";
 
 export interface ReportData {
   reference: string;
@@ -44,6 +45,9 @@ export interface ReportData {
     category: string;
     accessResult: string;
     checkedDate: string;
+    validUntil?: string | null;
+    recheckOn?: string | null;
+    validityNote?: string | null;
     locator: string | null;
     summary: string;
     confidence: string;
@@ -84,6 +88,9 @@ type CaseLike = {
     category: string;
     accessResult: string;
     checkedDate: string;
+    validUntil?: string | null;
+    recheckOn?: string | null;
+    validityNote?: string | null;
     locator: string | null;
     summary: string;
     confidence: string;
@@ -102,7 +109,7 @@ export function buildReportData(c: CaseLike, asOf: string): ReportData {
   const documentsById = new Map((c.documents ?? []).map((d) => [d.id, d]));
   const latestReview = c.reviews.find((r) => r.caseVersion === c.version && r.result === "PASS") ?? null;
   const suggestion = suggestOutcome(
-    c.findings.map((f) => ({ layer: f.layer, status: f.status as never, critical: f.critical })),
+    evidenceDecisionFindings(c.findings, c.evidence, asOf).map((f) => ({ layer: f.layer, status: f.status as never, critical: f.critical })),
     c.discrepancies.map((d) => ({ code: d.code, severity: d.severity as never, state: d.state as never, established: d.established })),
   );
   return {
@@ -159,6 +166,9 @@ export function buildReportData(c: CaseLike, asOf: string): ReportData {
       category: e.category,
       accessResult: e.accessResult,
       checkedDate: e.checkedDate,
+      validUntil: e.validUntil ?? null,
+      recheckOn: e.recheckOn ?? null,
+      validityNote: e.validityNote ?? null,
       locator: e.locator,
       summary: e.summary,
       confidence: e.confidence,

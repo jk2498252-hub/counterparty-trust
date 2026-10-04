@@ -42,5 +42,12 @@ jobs:
           npm run test:e2e
           node e2e/controls.mjs
           node e2e/security.mjs
+          node e2e/automation.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: automation-ui
+          path: e2e/screens/automation.png
+          if-no-files-found: ignore
       - if: failure()
         run: cat server.log || true

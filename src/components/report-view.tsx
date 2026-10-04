@@ -126,6 +126,7 @@ export function ReportView({ data, released, hash }: { data: ReportData; release
               {e.locator ? ` · ${e.locator}` : ""}. {e.summary}
               {e.url && <div className="break-all text-xs text-muted">{e.url}</div>}
               {e.capture && <div className="break-all text-xs text-muted">Capture: {e.capture.name} · SHA-256 {e.capture.sha256}</div>}
+              {(e.validUntil || e.recheckOn) && <div className="text-xs text-muted">Recorded validity: {e.validUntil && <>source expires {dateStr(e.validUntil)}; </>}{e.recheckOn && <>recheck on {dateStr(e.recheckOn)}; </>}{e.validityNote}</div>}
             </li>
           ))}
         </ol>
