@@ -110,12 +110,13 @@ export default async function CasePage({ params, searchParams }: { params: Promi
         }
       />
       <Flash ok={sp.ok} err={sp.err} />
-      <nav className="no-print mb-6 flex gap-1 overflow-x-auto border-b border-line">
+      <nav aria-label="Case sections" className="no-print mb-6 flex flex-wrap gap-1 border-b border-line">
         {TABS.map(([k, labelText]) => (
           <Link
             key={k}
             href={`/cases/${id}?tab=${k}`}
-            className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === k ? "border-brand text-brand" : "border-transparent text-muted hover:text-ink"}`}
+            aria-current={tab === k ? "page" : undefined}
+            className={`whitespace-nowrap border-b-2 px-2 py-2 text-sm font-medium ${tab === k ? "border-brand text-brand" : "border-transparent text-muted hover:text-ink"}`}
           >
             {labelText}
           </Link>
