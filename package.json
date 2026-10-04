@@ -1,6 +1,6 @@
 {
   "name": "kenya-counterparty-trust",
-  "version": "1.0.0",
+  "version": "0.2.1",
   "description": "",
   "scripts": {
     "dev": "next dev",
@@ -10,15 +10,18 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "node e2e/full-case.mjs",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node scripts/migrate.mjs",
-    "user:create": "node scripts/create-user.mjs",
-    "demo:users": "node scripts/demo-users.mjs"
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
+    "user:create": "node --env-file-if-exists=.env scripts/create-user.mjs",
+    "demo:users": "node --env-file-if-exists=.env scripts/demo-users.mjs",
+    "test:desktop": "node --test desktop/*.test.cjs",
+    "user:recover": "node --env-file-if-exists=.env scripts/recover-admin.mjs"
   },
   "license": "ISC",
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.3",
+    "fflate": "^0.8.3",
     "jose": "^6.2.12",
     "next": "^16.3.8",
     "otplib": "^12.0.1",
@@ -46,6 +49,6 @@
   },
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

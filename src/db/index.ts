@@ -2,6 +2,7 @@ import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-post
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { PGlite } from "@electric-sql/pglite";
 import { Pool } from "pg";
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as schema from "./schema";
 
 // Two ways to run:
@@ -10,6 +11,8 @@ import * as schema from "./schema";
 //    stores data in PGLITE_DIR on this computer.
 
 type DB = NodePgDatabase<typeof schema>;
+export type Transaction = Parameters<Parameters<DB["transaction"]>[0]>[0];
+export const transactionContext = new AsyncLocalStorage<Transaction>();
 const g = globalThis as unknown as { __kctDb?: DB; __kctPglite?: PGlite; __kctPool?: Pool };
 
 function create(): DB {
@@ -24,7 +27,7 @@ function create(): DB {
   return drizzlePglite(g.__kctPglite, { schema }) as unknown as DB;
 }
 
-function getDb(): DB {
+export function getDb(): DB {
   if (!g.__kctDb) g.__kctDb = create();
   return g.__kctDb;
 }
@@ -32,7 +35,7 @@ function getDb(): DB {
 /** Lazily connected: nothing opens until the first query. */
 export const db = new Proxy({} as DB, {
   get(_t, prop) {
-    const real = getDb();
+    const real = transactionContext.getStore() ?? getDb();
     const v = Reflect.get(real, prop, real);
     return typeof v === "function" ? v.bind(real) : v;
   },

@@ -27,9 +27,11 @@ console.log("✓ First admin created and two-factor turned on");
 await page.goto(`${BASE}/team`);
 await page.fill('input[name="name"]', "New Analyst");
 await page.fill('input[name="email"]', "new.analyst@example.test");
+await page.fill('input[name="password"]', "new-analyst-initial-password");
 await page.click('button:has-text("Create account")');
-await page.waitForSelector("text=Temporary password");
-console.log("✓ Admin added a teammate and got a temporary password");
+await page.waitForSelector("text=Share the initial password privately");
+if (decodeURIComponent(page.url()).includes("new-analyst-initial-password")) fail("A password appeared in a redirect URL");
+console.log("✓ Admin added a teammate without exposing a password in the URL");
 
 const again = await browser.newPage();
 await again.goto(`${BASE}/setup`);

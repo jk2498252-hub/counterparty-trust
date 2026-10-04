@@ -109,6 +109,10 @@ export const timeActivityEnum = pgEnum("time_activity", [
   "OTHER",
 ]);
 
+// One organisation per installation. Serialise workflow mutations so an edit,
+// review, release, payment decision and its audit record commit together.
+export const appLocks = pgTable("app_locks", { id: text("id").primaryKey() });
+
 // ---------- Tables ----------
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -127,6 +131,9 @@ export const users = pgTable(
     active: boolean("active").notNull().default(true),
     failedLogins: integer("failed_logins").notNull().default(0),
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    failedMfaAttempts: integer("failed_mfa_attempts").notNull().default(0),
+    mfaLockedUntil: timestamp("mfa_locked_until", { withTimezone: true }),
+    mustChangePassword: boolean("must_change_password").notNull().default(false),
     sessionVersion: integer("session_version").notNull().default(1),
     createdAt: created(),
   },

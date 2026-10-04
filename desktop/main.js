@@ -1,6 +1,6 @@
 // Desktop launcher: starts the workbench on this computer and shows it in a window.
 // Data (database, uploaded documents, keys) lives in the user's app-data folder.
-const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { fork } = require("node:child_process");
 const crypto = require("node:crypto");
@@ -8,12 +8,17 @@ const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
+const { stopServerProcess } = require("./lifecycle");
+const { createBackup } = require("./backup");
 
 const APP_NAME = "Counterparty Trust";
 let serverProcess = null;
 let mainWindow = null;
 let port = 0;
 let quitting = false;
+let shutdownInProgress = false;
+const requestedUserData = app.commandLine.getSwitchValue("user-data-dir");
+if (requestedUserData) app.setPath("userData", path.resolve(requestedUserData));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -91,6 +96,7 @@ async function startServer() {
       NEXT_TELEMETRY_DISABLED: "1",
       PORT: String(port),
       HOSTNAME: "127.0.0.1",
+      ALLOW_FIRST_RUN_SETUP: "true",
       PGLITE_DIR: path.join(dataRoot(), "database"),
       UPLOAD_DIR: path.join(dataRoot(), "documents"),
       SESSION_SECRET: config.sessionSecret,
@@ -120,44 +126,56 @@ async function startServer() {
 }
 
 function stopServer() {
-  return new Promise((resolve) => {
-    const proc = serverProcess;
-    if (!proc || proc.exitCode !== null) return resolve();
-    const timer = setTimeout(() => {
-      proc.kill();
-      resolve();
-    }, 8000);
-    proc.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
+  return stopServerProcess(serverProcess);
+}
+
+function backupPassword() {
+  return new Promise(resolve => {
+    const window = new BrowserWindow({
+      width: 470, height: 450, parent: mainWindow, modal: true, resizable: false,
+      title: "Encrypt backup", webPreferences: { preload: path.join(__dirname, "backup-preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false },
     });
-    try {
-      proc.send("shutdown"); // lets the database close cleanly
-    } catch {
-      proc.kill();
-    }
+    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    window.webContents.on("will-navigate", event => event.preventDefault());
+    let submitted = false;
+    ipcMain.handle("backup-password", (event, password) => {
+      if (event.sender !== window.webContents || typeof password !== "string" || password.length < 12 || password.length > 1024) return false;
+      submitted = true;
+      resolve(password);
+      setImmediate(() => window.close());
+      return true;
+    });
+    window.on("closed", () => {
+      ipcMain.removeHandler("backup-password");
+      if (!submitted) resolve(null);
+    });
+    window.loadFile(path.join(__dirname, "backup-password.html"));
   });
 }
 
 async function backupData() {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: "Choose where to save the backup",
-    properties: ["openDirectory", "createDirectory"],
-  });
-  if (canceled || !filePaths[0]) return;
+  if (shutdownInProgress) return;
+  shutdownInProgress = true;
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-  const target = path.join(filePaths[0], `Counterparty Trust backup ${stamp}`);
-  quitting = true; // the server restart below is intentional
-  await stopServer();
   try {
-    fs.cpSync(dataRoot(), target, { recursive: true, filter: (src) => !src.endsWith(".lock") });
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: "Save an encrypted backup", defaultPath: `Counterparty-Trust-${stamp}.kctbackup`,
+      filters: [{ name: "Encrypted Counterparty Trust backup", extensions: ["kctbackup"] }],
+    });
+    if (canceled || !filePath) return;
+    const password = await backupPassword();
+    if (!password) return;
+    quitting = true;
+    await stopServer();
+    serverProcess = null;
+    await createBackup(dataRoot(), filePath, password);
     await startServer();
     quitting = false;
     mainWindow.loadURL(`http://127.0.0.1:${port}/`);
     dialog.showMessageBox(mainWindow, {
       type: "info",
       message: "Backup saved",
-      detail: `${target}\n\nThe backup includes your encryption keys. Keep it somewhere safe and private.`,
+      detail: `${filePath}\n\nKeep your backup password separately. It is required to restore your files and encryption keys.`,
     });
   } catch (e) {
     quitting = false;
@@ -166,6 +184,9 @@ async function backupData() {
       await startServer();
       mainWindow.loadURL(`http://127.0.0.1:${port}/`);
     }
+  } finally {
+    shutdownInProgress = false;
+    if (mainWindow?.isDestroyed()) app.quit();
   }
 }
 
@@ -178,7 +199,8 @@ let manualCheck = false;
 function setupUpdates() {
   if (!app.isPackaged) return; // only installed copies update themselves
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Installation is explicitly initiated after the server has actually exited.
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.on("update-downloaded", async (info) => {
     updateReady = info.version;
     buildMenu();
@@ -211,10 +233,19 @@ function setupUpdates() {
 }
 
 async function installUpdateNow() {
+  if (shutdownInProgress) return;
+  shutdownInProgress = true;
   quitting = true;
-  await stopServer(); // close the database cleanly before the installer runs
-  serverProcess = null;
-  autoUpdater.quitAndInstall(false, true);
+  try {
+    await stopServer();
+    serverProcess = null;
+    autoUpdater.quitAndInstall(false, true);
+  } catch (error) {
+    quitting = false;
+    dialog.showErrorBox(APP_NAME, `Update postponed: ${error.message}`);
+  } finally {
+    shutdownInProgress = false;
+  }
 }
 
 function checkForUpdatesNow() {
@@ -327,10 +358,20 @@ app.whenReady().then(() => {
 app.on("before-quit", async (event) => {
   if (serverProcess && serverProcess.exitCode === null) {
     event.preventDefault();
+    if (shutdownInProgress) return;
+    shutdownInProgress = true;
     quitting = true;
-    await stopServer();
-    serverProcess = null;
-    app.quit();
+    try {
+      await stopServer();
+      serverProcess = null;
+      if (updateReady) autoUpdater.quitAndInstall(false, true);
+      else app.quit();
+    } catch (error) {
+      quitting = false;
+      dialog.showErrorBox(APP_NAME, `Couldn't close the workbench: ${error.message}`);
+    } finally {
+      shutdownInProgress = false;
+    }
   }
 });
 

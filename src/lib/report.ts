@@ -48,6 +48,7 @@ export interface ReportData {
     summary: string;
     confidence: string;
     url: string | null;
+    capture?: { documentId: string; name: string; sha256: string } | null;
   }[];
   review: { reviewer: string; date: string; result: string } | null;
   suggestedOutcome: Outcome | null;
@@ -87,7 +88,9 @@ type CaseLike = {
     summary: string;
     confidence: string;
     url: string | null;
+    documentId?: string | null;
   }[];
+  documents?: { id: string; originalName: string; sha256: string }[];
   discrepancies: { code: string; severity: string; state: string; established: boolean; description: string; explanation: string | null; effect: string | null }[];
   payments: { beneficiaryName: string; bankName: string; accountLast4: string; status: string; isChange: boolean }[];
   reviews: { reviewerId: string; result: string; caseVersion: number; createdAt: Date }[];
@@ -96,6 +99,7 @@ type CaseLike = {
 
 export function buildReportData(c: CaseLike, asOf: string): ReportData {
   const codeById = new Map(c.evidence.map((e) => [e.id, e.code]));
+  const documentsById = new Map((c.documents ?? []).map((d) => [d.id, d]));
   const latestReview = c.reviews.find((r) => r.caseVersion === c.version && r.result === "PASS") ?? null;
   const suggestion = suggestOutcome(
     c.findings.map((f) => ({ layer: f.layer, status: f.status as never, critical: f.critical })),
@@ -159,6 +163,9 @@ export function buildReportData(c: CaseLike, asOf: string): ReportData {
       summary: e.summary,
       confidence: e.confidence,
       url: e.url,
+      capture: e.documentId && documentsById.has(e.documentId)
+        ? { documentId: e.documentId, name: documentsById.get(e.documentId)!.originalName, sha256: documentsById.get(e.documentId)!.sha256 }
+        : null,
     })),
     review: latestReview
       ? { reviewer: c.userName(latestReview.reviewerId), date: latestReview.createdAt.toISOString().slice(0, 10), result: latestReview.result }

@@ -8,11 +8,12 @@ export default async function SecurityPage({ searchParams }: { searchParams: Pro
   const user = await requireUser({ allowMfaSetup: true });
   const sp = await searchParams;
   const needsSetup = !user.totpEnabled || sp.setup === "1";
-  const setup = needsSetup ? await newMfaSetup(user.id, user.email) : null;
+  const setup = needsSetup ? await newMfaSetup(user.id, user.email, user.sessionVersion) : null;
   return (
     <>
       <PageHeader title="Security" subtitle="Two-factor login and password" />
       <Flash ok={sp.ok} err={sp.err} />
+      {user.mustChangePassword && <p className="mb-6 rounded border border-amber-200 bg-amber-50 p-3 text-sm">Change your initial or reset password before opening case files.</p>}
       {mfaRequired() && !user.mfaPassed && (
         <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Turn on two-factor login to continue. Case files hold supplier bank details and client documents.
@@ -33,8 +34,17 @@ export default async function SecurityPage({ searchParams }: { searchParams: Pro
               <code className="block break-all rounded bg-paper px-2 py-1 text-xs">{setup.secret}</code>
               <input type="hidden" name="secret" value={setup.secret} />
               <input type="hidden" name="sig" value={setup.sig} />
+              <input type="hidden" name="expires" value={setup.expires} />
+              {user.totpEnabled && <>
+                <label className="label">Current password</label>
+                <input className="input" type="password" name="currentPassword" autoComplete="current-password" required />
+                <label className="label">Code from your existing authenticator</label>
+                <input className="input" name="currentCode" inputMode="numeric" maxLength={6} required />
+                <label className="label">Code from your new authenticator</label>
+              </>}
               <input className="input" name="code" inputMode="numeric" placeholder="123456" maxLength={8} required />
-              <SubmitButton>Turn on two-factor login</SubmitButton>
+              <p className="text-xs text-muted">Setup expires after five minutes. Changing the authenticator signs out other sessions.</p>
+              <SubmitButton>{user.totpEnabled ? "Replace authenticator" : "Turn on two-factor login"}</SubmitButton>
             </form>
           ) : (
             <div className="space-y-3 text-sm">

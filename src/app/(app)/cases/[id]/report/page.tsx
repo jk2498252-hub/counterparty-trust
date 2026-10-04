@@ -11,6 +11,7 @@ import { isUuid } from "@/lib/nav";
 import { buildReportData, type ReportData } from "@/lib/report";
 import { requireUser } from "@/lib/session";
 import { audit } from "@/lib/audit";
+import { reportMatches } from "@/lib/integrity";
 
 export default async function ReportPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ r?: string }> }) {
   const user = await requireUser();
@@ -27,6 +28,10 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
   if (reportId) {
     const [rep] = await db.select().from(reports).where(and(eq(reports.id, reportId), eq(reports.caseId, id)));
     if (!rep) notFound();
+    if (!reportMatches(rep)) {
+      await audit(user.id, "report.integrity_failed", { reportId }, id);
+      return <div role="alert" className="card"><h1 className="font-semibold">Report integrity check failed</h1><p className="mt-2">Ask an administrator to restore the original report before sharing it.</p><Link href={`/cases/${id}`} className="mt-4 inline-block underline">Back to case</Link></div>;
+    }
     data = rep.snapshot as ReportData;
     released = true;
     hash = rep.sha256;
