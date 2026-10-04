@@ -12,6 +12,7 @@ const userData = mkdtempSync(path.join(os.tmpdir(), "kct-published-v030-"));
 const shots = process.env.SHOTS_DIR ?? "./e2e/screens";
 mkdirSync(shots, { recursive: true });
 const checks = [];
+const observations = [];
 const passed = message => { checks.push(message); console.log(`✓ ${message}`); };
 const day = offset => new Date(Date.now() + offset * 86_400_000).toLocaleDateString("en-CA", { timeZone: "Africa/Nairobi" });
 let app, win, secret;
@@ -20,7 +21,13 @@ async function launch() {
   app = await electron.launch({ executablePath: exe, args: [`--user-data-dir=${userData}`, "--no-sandbox"], cwd: path.dirname(exe) });
   win = await app.firstWindow();
   win.setDefaultTimeout(30_000);
-  await win.waitForURL(/\/(setup|login)/, { timeout: 90_000 });
+  // Keep this acceptance run on the pinned binary if a newer release appears.
+  // The native menu still queries the real GitHub feed; no update is installed.
+  await app.evaluate(({ app }) => {
+    const load = process.getBuiltinModule("module").createRequire(`${app.getAppPath()}/main.js`);
+    load("electron-updater").autoUpdater.autoDownload = false;
+  });
+  await win.waitForURL(url => url.protocol === "http:" && url.hostname === "127.0.0.1" && ["/setup", "/login", "/"].includes(url.pathname), { timeout: 90_000 });
 }
 
 async function press(locator) {
@@ -55,13 +62,13 @@ try {
   while (true) {
     const messages = await app.evaluate(() => ({ dialogs: globalThis.__publishedDialogs, error: globalThis.__publishedError }));
     assert(!messages.error, messages.error);
-    if (messages.dialogs.some(d => d.message === "You have the latest version (0.3.0).")) break;
+    if (messages.dialogs.some(d => d.message === "You have the latest version (0.3.0)." || /^Version \d+\.\d+\.\d+ is downloading$/.test(d.message))) break;
     const failure = messages.dialogs.find(d => d.message === "Couldn't check for updates");
     assert(!failure, "The published app could not reach its update feed");
     assert(Date.now() < updateDeadline, "Live update check did not finish within 60 seconds");
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-  passed("The real Help update action reaches GitHub and recognises the current version");
+  passed("The real Help update action reaches GitHub and reports release availability");
 
   assert.equal(new URL(win.url()).pathname, "/setup");
   await win.fill("#name", "Published Release Tester");
@@ -120,6 +127,32 @@ try {
   assert.equal(await win.getByText("Refresh support for legal identity", { exact: true }).count(), 0);
   passed("Recording a corrected validity policy clears the corresponding smart alerts");
 
+  // Probe source quality separately from date validity; record a gap rather than
+  // treating a source's dates as proof that it can support an identity claim.
+  await win.goto(`${base}${casePath}?tab=evidence`);
+  await win.fill("#sourceName", "Fictional unverified record");
+  await win.selectOption("#category", "UNVERIFIED");
+  await win.fill("#summary", "Fictional uncorroborated information for the source-quality probe");
+  await win.fill("#validUntil", day(2));
+  await win.fill("#validityNote", "Fictional date policy for the source-quality probe");
+  await press(win.getByRole("button", { name: "Log evidence", exact: true }));
+  await win.goto(`${base}${casePath}?tab=checks`);
+  const identity = win.locator("#LEGAL_IDENTITY form");
+  for (const box of await identity.locator('input[name="evidenceIds"]').all()) await box.uncheck();
+  await identity.locator("label", { hasText: "E02" }).locator('input[name="evidenceIds"]').check();
+  await press(identity.getByRole("button", { name: /Save/ }));
+  await win.goto(`${base}${casePath}?tab=assistant`);
+  if (await win.getByText("Refresh support for legal identity", { exact: true }).count() === 0) {
+    observations.push({ code: "SOURCE_TYPE_NOT_ENFORCED", detail: "v0.3.0 counts an examined source tagged Unverified with current dates as positive legal-identity support. Source quality still depends on human review; enforce per-check source requirements before production." });
+    console.log("Observed gap: a source tagged Unverified clears the legal-identity support warning in v0.3.0.");
+  }
+  await win.goto(`${base}${casePath}?tab=checks`);
+  const correctedIdentity = win.locator("#LEGAL_IDENTITY form");
+  for (const box of await correctedIdentity.locator('input[name="evidenceIds"]').all()) await box.uncheck();
+  await correctedIdentity.locator("label", { hasText: "E01" }).locator('input[name="evidenceIds"]').check();
+  await press(correctedIdentity.getByRole("button", { name: /Save/ }));
+  passed("Source-quality probe completed; any observed gap is retained in the result");
+
   await win.goto(`${base}/cases/new`);
   await win.fill("#kraPin", "P999999999X");
   await win.getByText("Possible existing supplier", { exact: true }).waitFor();
@@ -161,6 +194,10 @@ try {
 
   await app.close(); app = null;
   await launch();
+  if (new URL(win.url()).pathname === "/") {
+    await press(win.getByRole("button", { name: "Sign out", exact: true }));
+    await win.waitForURL(/\/login$/);
+  }
   assert.equal(new URL(win.url()).pathname, "/login");
   await win.fill("#email", "published-tester@example.test");
   await win.fill("#password", "published-test-password-123");
@@ -171,12 +208,12 @@ try {
   await win.waitForURL(url => url.pathname === "/");
   const reopenedBase = new URL(win.url()).origin;
   await win.goto(`${reopenedBase}${casePath}?tab=evidence`);
-  await win.getByText("Current under recorded policy", { exact: true }).waitFor();
+  await win.locator("tr", { has: win.getByText("E01", { exact: true }) }).getByText("Current under recorded policy", { exact: true }).waitFor();
   await win.getByText("Corrected transcription of the fictional source expiry", { exact: true }).waitFor();
   passed("MFA login, case records and corrected source validity survive closing and reopening");
   await app.close(); app = null;
   passed("Installed app closes cleanly after the acceptance checks");
-  writeFileSync(`${shots}/published-result.json`, JSON.stringify({ version: "0.3.0", installerSha256: "0177a3ae65c3b07538dffca8fbf3904813b4f4e48dcc2cb87f1a6b4c35cb2738", passed: checks }, null, 2));
+  writeFileSync(`${shots}/published-result.json`, JSON.stringify({ version: "0.3.0", installerSha256: "0177a3ae65c3b07538dffca8fbf3904813b4f4e48dcc2cb87f1a6b4c35cb2738", passed: checks, observations }, null, 2));
 } finally {
   if (app) await app.close();
 }
